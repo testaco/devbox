@@ -17,8 +17,9 @@ RUN useradd -m -s /bin/bash devbox && \
 USER devbox
 WORKDIR /home/devbox
 RUN curl --proto '=https' --tlsv1.2 -sSf -L \
-    https://install.determinate.systems/nix | sh -s -- install linux --init none --no-confirm \
-    --extra-conf "trusted-users = devbox"
+    https://install.determinate.systems/nix | sh -s -- install linux \
+    --init none --no-confirm --no-start-daemon \
+    --extra-conf "experimental-features = nix-command flakes"
 
 # Switch back to root for remaining setup
 USER root
