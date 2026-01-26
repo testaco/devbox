@@ -282,8 +282,102 @@ cmd_create() {
 }
 
 cmd_list() {
-    log_error "Command 'list' not yet implemented"
-    exit 1
+    # Parse flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                cat << EOF
+devbox list - List all devbox containers with status
+
+USAGE:
+    devbox list [options]
+
+OPTIONS:
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Lists all devbox containers with their current status, repository,
+    port mappings, and authentication mode. Shows containers in both
+    running and stopped states.
+
+EXAMPLES:
+    # List all containers
+    devbox list
+
+EOF
+                return 0
+                ;;
+            --*)
+                log_error "Unknown option: $1"
+                return 1
+                ;;
+            *)
+                log_error "Unexpected argument: $1"
+                return 1
+                ;;
+        esac
+    done
+
+    # Get all devbox containers (both running and stopped)
+    local containers
+    containers=$(docker ps -a --filter "name=^${CONTAINER_PREFIX}" --format "{{.ID}}\t{{.Names}}\t{{.Status}}" 2>/dev/null || true)
+
+    if [[ -z "$containers" ]]; then
+        log_info "No devbox containers found"
+        echo
+        echo "Create your first container with:"
+        echo "  devbox create <name> <repo-url>"
+        return 0
+    fi
+
+    # Print table header
+    printf "%-12s %-10s %-10s %-35s %-15s %s\n" "NAME" "ID" "STATUS" "REPO" "PORTS" "MODE"
+    printf "%-12s %-10s %-10s %-35s %-15s %s\n" "----" "--" "------" "----" "-----" "----"
+
+    # Process each container
+    while IFS=$'\t' read -r container_id container_name status; do
+        # Extract container name without prefix
+        # Handle both regular devbox containers and test containers
+        local display_name="$container_name"
+        if [[ "$container_name" == devbox-test-* ]]; then
+            display_name="${container_name#devbox-test-}"
+        elif [[ "$container_name" == devbox-* ]]; then
+            display_name="${container_name#devbox-}"
+        fi
+
+        # Get short ID
+        local short_id="${container_id:0:8}"
+
+        # Determine simple status
+        local simple_status="exited"
+        if [[ "$status" == *"Up"* ]]; then
+            simple_status="running"
+        fi
+
+        # Get container labels
+        local repo mode ports
+        repo=$(docker inspect --format '{{index .Config.Labels "devbox.repo"}}' "$container_id" 2>/dev/null || echo "unknown")
+        mode=$(docker inspect --format '{{index .Config.Labels "devbox.mode"}}' "$container_id" 2>/dev/null || echo "oauth")
+        ports=$(docker inspect --format '{{index .Config.Labels "devbox.ports"}}' "$container_id" 2>/dev/null || echo "")
+
+        # Handle empty ports
+        if [[ -z "$ports" ]] || [[ "$ports" == "<no value>" ]]; then
+            ports="-"
+        fi
+
+        # Handle unknown/missing values
+        if [[ "$repo" == "<no value>" ]]; then
+            repo="unknown"
+        fi
+        if [[ "$mode" == "<no value>" ]]; then
+            mode="oauth"
+        fi
+
+        # Print container row
+        printf "%-12s %-10s %-10s %-35s %-15s %s\n" \
+            "$display_name" "$short_id" "$simple_status" "$repo" "$ports" "$mode"
+
+    done <<< "$containers"
 }
 
 cmd_attach() {

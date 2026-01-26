@@ -186,14 +186,51 @@ main() {
 - **Docker volume management** requires careful cleanup in test scenarios
 - **Environment variable forwarding** to containers enables flexible configuration
 
+### Completed: `devbox list` Command ✅
+
+**Status**: Complete with comprehensive testing and documentation
+
+**Implementation Highlights**:
+- Docker container enumeration using `docker ps -a` with name filters
+- Container label extraction for metadata (repo, mode, ports)
+- Formatted table output with proper column alignment using `printf`
+- Robust container name resolution supporting both test and production prefixes
+- Comprehensive flag parsing and help text
+- Graceful handling of containers without metadata labels
+
+**Testing Strategy**:
+- Created dedicated `test_list.sh` with 7 comprehensive tests covering:
+  - Help text validation and flag parsing
+  - Empty container list handling
+  - Single and multiple container display
+  - Table header formatting validation
+  - Non-devbox container filtering
+  - Error handling for invalid flags
+- Isolated test environment using Alpine base image to avoid entrypoint conflicts
+- Proper cleanup with container tracking and teardown
+
+**Key Technical Learnings**:
+- **Container metadata strategy**: Using Docker labels is effective for storing container configuration (repo URL, auth mode, port mappings)
+- **Test isolation**: Using lightweight Alpine images for tests avoids complex entrypoint issues with custom base images
+- **Table formatting**: `printf` with field widths provides consistent output formatting across variable-length data
+- **Prefix handling**: Flexible name extraction logic handles both production (`devbox-`) and test (`devbox-test-`) container prefixes
+- **Status parsing**: Docker status strings require parsing to extract simple "running/exited" states
+- **Graceful degradation**: Missing or malformed container labels should default to sensible values rather than breaking output
+
+**Technical Patterns Established**:
+- Container enumeration pattern that will be reused by other commands (`attach`, `stop`, `start`, `rm`)
+- Label-based metadata storage convention for devbox containers
+- Consistent table output formatting approach
+- Test container management patterns for integration testing
+
 ## Next Priority Tasks
 
-Based on current progress and with init completed, the next highest-leverage tasks are:
+Based on current progress with both init and list completed, the next highest-leverage tasks are:
 
-1. **Implement `devbox list`** - Simple command that validates Docker container enumeration patterns
-2. **Implement `devbox create`** - Core functionality for container creation and lifecycle
+1. **Implement `devbox create`** - Core functionality for container creation and lifecycle management
+2. **Implement container lifecycle commands** - `attach`, `stop`, `start`, `rm` to enable complete workflow
 3. **Add end-to-end authentication testing** - Validate full init flow with real GitHub/Claude auth
-4. **Implement container lifecycle commands** - `attach`, `stop`, `start`, `rm` for complete workflow
+4. **Implement additional commands** - `logs`, `exec`, `ports` for enhanced container management
 
 ## Lessons for Future Agent Development
 

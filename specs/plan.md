@@ -85,9 +85,9 @@
 - [ ] Print success message
 
 ### `devbox list`
-- [ ] Query Docker for containers with devbox prefix
-- [ ] Extract labels (repo, mode, ports)
-- [ ] Format table output (NAME, ID, STATUS, REPO, PORTS, MODE)
+- [x] Query Docker for containers with devbox prefix
+- [x] Extract labels (repo, mode, ports)
+- [x] Format table output (NAME, ID, STATUS, REPO, PORTS, MODE)
 
 ### `devbox attach <name-or-id>`
 - [ ] Resolve name to container ID
