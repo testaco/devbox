@@ -4,6 +4,14 @@ set -e
 REPO_URL="${DEVBOX_REPO_URL}"
 REPO_DIR="/workspace"
 
+# Set up Claude configuration directory
+if [ -f "/devbox-credentials/claude/settings.json" ]; then
+    echo "Setting up Claude configuration..."
+    mkdir -p ~/.claude
+    cp /devbox-credentials/claude/settings.json ~/.claude/settings.json
+    echo "✓ Claude settings.json copied to ~/.claude"
+fi
+
 # Clone repository if not already present
 if [ ! -d "$REPO_DIR/.git" ]; then
     # Use gh repo clone to leverage GitHub CLI authentication

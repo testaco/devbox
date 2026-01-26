@@ -37,6 +37,21 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
     && apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
 
+# Install AWS CLI v2 (architecture-aware)
+RUN apt-get update && apt-get install -y unzip \
+    && ARCH=$(uname -m) \
+    && if [ "$ARCH" = "x86_64" ]; then \
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"; \
+    elif [ "$ARCH" = "aarch64" ]; then \
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"; \
+    else \
+        echo "Unsupported architecture: $ARCH" && exit 1; \
+    fi \
+    && unzip awscliv2.zip \
+    && ./aws/install \
+    && rm -rf awscliv2.zip aws \
+    && apt-get remove -y unzip && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
 # Install Node.js (required for Claude Code)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
