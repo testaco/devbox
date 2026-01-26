@@ -93,9 +93,9 @@
 - [x] Format table output (NAME, ID, STATUS, REPO, PORTS, MODE)
 
 ### `devbox attach <name-or-id>`
-- [ ] Resolve name to container ID
-- [ ] Run `docker attach` with proper TTY settings
-- [ ] Handle Ctrl+P,Q detach sequence
+- [x] Resolve name to container ID
+- [x] Run `docker attach` with proper TTY settings
+- [x] Handle Ctrl+P,Q detach sequence
 
 ### `devbox stop <name-or-id>`
 - [ ] Resolve name to container ID
@@ -178,7 +178,7 @@
 
 ### Checkpoint 3: Workflow Works
 - [ ] `devbox create` clones repo and enters Nix shell
-- [ ] `devbox attach` connects to running shell
+- [x] `devbox attach` connects to running shell
 - [ ] Detach (Ctrl+P,Q) leaves container running
 - [ ] Reattach reconnects to same session
 - [ ] `gh` commands work inside container
