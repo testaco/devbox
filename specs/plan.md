@@ -44,6 +44,22 @@
 - [x] Add container name resolution helper
 - [x] Create unit tests for basic functionality
 
+### Test Infrastructure & Pre-commit Hooks
+- [x] Create comprehensive test suite (`tests/test_cli_basic.sh`, `tests/test_init.sh`)
+- [x] Move `PROMPT` to `PROMPT.md` and ensure it's committed
+- [ ] Setup pre-commit hook that runs all tests
+  - [ ] Create `.git/hooks/pre-commit` script that:
+    - [ ] Changes to repository root directory
+    - [ ] Runs `tests/test_cli_basic.sh` with colored output
+    - [ ] Runs `tests/test_init.sh` with colored output
+    - [ ] Tracks overall success/failure across all test suites
+    - [ ] Provides clear success/failure messages
+    - [ ] Exits with code 1 (abort commit) if any tests fail
+    - [ ] Exits with code 0 (allow commit) if all tests pass
+  - [ ] Make hook executable (`chmod +x .git/hooks/pre-commit`)
+  - [ ] Test hook by making a test commit
+  - [ ] Add instructions in README for hook setup on new clones
+
 ### `devbox init`
 - [x] Check if credentials volume exists, create if not
 - [x] Parse `--bedrock` flag
