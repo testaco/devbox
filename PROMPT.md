@@ -5,3 +5,4 @@ IMPORTANT:
 - use property and unit testing as appropriate and follow test driven development
 - update AGENTS.md with any useful learnings
 - when you complete the task, update the plan.md file and then commit
+- always then make sure that all changes were committed
