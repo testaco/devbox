@@ -98,8 +98,12 @@
 - [x] Handle Ctrl+P,Q detach sequence
 
 ### `devbox stop <name-or-id>`
-- [ ] Resolve name to container ID
-- [ ] Run `docker stop`
+- [x] Resolve name to container ID
+- [x] Run `docker stop`
+- [x] Handle already stopped containers gracefully
+- [x] Comprehensive help text with examples
+- [x] Full flag parsing (--help, --dry-run)
+- [x] Complete test suite with 8 comprehensive tests
 
 ### `devbox start <name-or-id>`
 - [ ] Resolve name to container ID
