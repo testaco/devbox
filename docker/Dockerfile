@@ -9,9 +9,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Nix (Determinate Systems installer)
+# Create non-root user first (Nix needs to be installed as the target user for single-user mode)
+RUN useradd -m -s /bin/bash devbox && \
+    echo "devbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Install Nix in single-user mode as devbox user
+USER devbox
+WORKDIR /home/devbox
 RUN curl --proto '=https' --tlsv1.2 -sSf -L \
-    https://install.determinate.systems/nix | sh -s -- install linux --init none --no-confirm
+    https://install.determinate.systems/nix | sh -s -- install linux --init none --no-confirm \
+    --extra-conf "trusted-users = devbox"
+
+# Switch back to root for remaining setup
+USER root
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -34,9 +44,7 @@ COPY entrypoint.sh /entrypoint.sh
 COPY init-credentials.sh /init-credentials.sh
 RUN chmod +x /entrypoint.sh /init-credentials.sh
 
-# Create non-root user and add to sudoers
-RUN useradd -m -s /bin/bash devbox && \
-    echo "devbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Switch back to devbox user for final setup
 USER devbox
 WORKDIR /home/devbox
 

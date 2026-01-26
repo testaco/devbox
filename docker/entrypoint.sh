@@ -6,10 +6,19 @@ REPO_DIR="/workspace"
 
 # Clone repository if not already present
 if [ ! -d "$REPO_DIR/.git" ]; then
-    git clone "$REPO_URL" "$REPO_DIR"
+    # Use gh repo clone to leverage GitHub CLI authentication
+    gh repo clone "$REPO_URL" "$REPO_DIR"
 fi
 
 cd "$REPO_DIR"
+
+# Set up Nix environment
+export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+if [ -f /nix/var/nix/profiles/default/etc/profile.d/nix.sh ]; then
+    source /nix/var/nix/profiles/default/etc/profile.d/nix.sh
+elif [ -f /home/devbox/.nix-profile/etc/profile.d/nix.sh ]; then
+    source /home/devbox/.nix-profile/etc/profile.d/nix.sh
+fi
 
 # Verify Nix configuration exists
 if [ ! -f "flake.nix" ] && [ ! -f "shell.nix" ]; then
