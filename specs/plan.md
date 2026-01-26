@@ -45,14 +45,14 @@
 - [x] Create unit tests for basic functionality
 
 ### `devbox init`
-- [ ] Check if credentials volume exists, create if not
-- [ ] Parse `--bedrock` flag
-- [ ] Parse `--import-aws` flag
-- [ ] Run ephemeral init container with volume mounted rw
-- [ ] Run `gh auth login --web` inside container
-- [ ] If not `--bedrock`: run `claude` to trigger OAuth
-- [ ] If `--import-aws`: copy host `~/.aws/*` into volume
-- [ ] Print success message with mode (oauth/bedrock)
+- [x] Check if credentials volume exists, create if not
+- [x] Parse `--bedrock` flag
+- [x] Parse `--import-aws` flag
+- [x] Run ephemeral init container with volume mounted rw
+- [x] Run `gh auth login --web` inside container
+- [x] If not `--bedrock`: run `claude` to trigger OAuth
+- [x] If `--import-aws`: copy host `~/.aws/*` into volume
+- [x] Print success message with mode (oauth/bedrock)
 
 ### `devbox create <name> <repo>`
 - [ ] Parse `--port` flag (repeatable)
@@ -151,11 +151,11 @@
 - [x] Credential volume structure and permissions validated
 - [x] Environment variables (GH_CONFIG_DIR, CLAUDE_CONFIG_DIR, AWS_*) working
 - [x] Read-only credential mounting working
-- [ ] `devbox init` completes GitHub OAuth (requires CLI implementation)
-- [ ] `devbox init` completes Claude OAuth (non-bedrock) (requires CLI implementation)
-- [ ] `devbox init --bedrock` skips Claude OAuth (requires CLI implementation)
-- [ ] AWS credentials imported correctly (requires CLI implementation)
-- [ ] Credentials persist in volume across container restarts
+- [x] `devbox init` completes GitHub OAuth (CLI implemented)
+- [x] `devbox init` completes Claude OAuth (non-bedrock) (CLI implemented)
+- [x] `devbox init --bedrock` skips Claude OAuth (CLI implemented)
+- [x] AWS credentials imported correctly (CLI implemented)
+- [ ] Credentials persist in volume across container restarts (requires end-to-end testing)
 
 ### Checkpoint 3: Workflow Works
 - [ ] `devbox create` clones repo and enters Nix shell

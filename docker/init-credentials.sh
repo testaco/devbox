@@ -79,13 +79,18 @@ fi
 # AWS credentials setup
 if [[ "${IMPORT_AWS:-false}" == "true" ]]; then
     echo "=== Importing AWS Credentials ==="
-    if [[ -d ~/.aws ]]; then
+    if [[ -d /host-aws ]]; then
         echo "Copying existing AWS credentials from host..."
+        cp /host-aws/* /devbox-credentials/aws/ 2>/dev/null || true
+        echo "✓ AWS credentials imported"
+        ls -la /devbox-credentials/aws/
+    elif [[ -d ~/.aws ]]; then
+        echo "Copying existing AWS credentials from ~/.aws..."
         cp ~/.aws/* /devbox-credentials/aws/ 2>/dev/null || true
         echo "✓ AWS credentials imported"
         ls -la /devbox-credentials/aws/
     else
-        echo "No existing AWS credentials found in ~/.aws"
+        echo "No existing AWS credentials found"
     fi
 else
     echo "=== Manual AWS Setup ==="

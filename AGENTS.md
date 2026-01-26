@@ -109,13 +109,20 @@ main() {
 
 **Test Levels Implemented**:
 1. **Unit tests**: Basic script functionality, argument parsing, help text
-2. **Integration tests**: Docker daemon interaction (planned)
+2. **Integration tests**: Docker daemon interaction, volume management
 3. **End-to-end tests**: Full workflow testing (planned)
+
+**Advanced Testing Patterns**:
+- **Dry-run modes**: Enable testing complex commands without side effects (`--dry-run` flag)
+- **Dedicated test files**: Created `test_init.sh` for comprehensive command-specific testing
+- **Docker integration testing**: Tests volume creation, cleanup, and error scenarios
+- **Flag combination testing**: Validates multiple flags work together correctly
 
 **Key Insights**:
 - Start with unit tests for quick feedback
-- Mock external dependencies where possible
-- Plan for testing in different environments (with/without Docker)
+- Dry-run modes are essential for testing destructive operations safely
+- Integration tests should include cleanup and error scenarios
+- Test files should be self-contained with proper setup/teardown
 
 ## Technical Decisions and Trade-offs
 
@@ -148,14 +155,45 @@ main() {
 - Requires Docker daemon and build context access
 - More complex error handling for build failures
 
+## Implementation Progress Update
+
+### Completed: `devbox init` Command ✅
+
+**Status**: Complete with comprehensive testing and documentation
+
+**Implementation Highlights**:
+- Full flag parsing (`--bedrock`, `--import-aws`, `--dry-run`, `--help`)
+- Interactive Docker volume management with user confirmation prompts
+- Environment variable passing to init containers for mode configuration
+- Host credential mounting for AWS import functionality
+- Comprehensive error handling and user feedback
+- Complete help documentation with examples
+
+**Testing Strategy**:
+- Created dedicated `test_init.sh` with 7 comprehensive tests covering:
+  - Help text validation
+  - Flag parsing (single and multiple flags)
+  - Error handling for invalid flags
+  - Docker volume operations
+  - Dry-run mode for safe testing
+- Updated existing `test_cli_basic.sh` to account for implemented functionality
+- All tests pass with proper cleanup and teardown
+
+**Key Technical Learnings**:
+- **User confirmation prompts** prevent accidental credential overwrites in CLIs
+- **Dry-run flags** are essential for testing commands with side effects
+- **Comprehensive flag parsing** with clear error messages improves user experience
+- **Docker volume management** requires careful cleanup in test scenarios
+- **Environment variable forwarding** to containers enables flexible configuration
+
 ## Next Priority Tasks
 
-Based on current progress, the next highest-leverage tasks are:
+Based on current progress and with init completed, the next highest-leverage tasks are:
 
-1. **Implement `devbox init`** - Enables credential setup, unblocking all other functionality
-2. **Implement `devbox list`** - Simple command that validates Docker integration
-3. **Implement `devbox create`** - Core functionality for container creation
-4. **Add integration tests** - Validate Docker interactions work correctly
+1. **Implement `devbox list`** - Simple command that validates Docker container enumeration patterns
+2. **Implement `devbox create`** - Core functionality for container creation and lifecycle
+3. **Add end-to-end authentication testing** - Validate full init flow with real GitHub/Claude auth
+4. **Implement container lifecycle commands** - `attach`, `stop`, `start`, `rm` for complete workflow
 
 ## Lessons for Future Agent Development
 

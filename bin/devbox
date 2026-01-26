@@ -138,10 +138,142 @@ EXAMPLES:
 EOF
 }
 
-# Command implementations (stubs for now)
+# Command implementations
 cmd_init() {
-    log_error "Command 'init' not yet implemented"
-    exit 1
+    local bedrock_mode=false
+    local import_aws=false
+    local dry_run=false
+
+    # Parse flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --bedrock)
+                bedrock_mode=true
+                shift
+                ;;
+            --import-aws)
+                import_aws=true
+                shift
+                ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --help|-h)
+                cat << EOF
+devbox init - One-time setup: authenticate GitHub CLI and Claude Code
+
+USAGE:
+    devbox init [options]
+
+OPTIONS:
+    --bedrock              Skip Claude OAuth, configure for Bedrock mode
+    --import-aws           Import existing AWS credentials from ~/.aws
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Performs initial setup by creating the credential volume and running
+    the authentication flow for GitHub CLI and Claude Code. Credentials
+    are stored in a Docker volume and shared across all devbox containers.
+
+EXAMPLES:
+    # Standard setup with Claude OAuth
+    devbox init
+
+    # Setup for AWS Bedrock mode
+    devbox init --bedrock --import-aws
+
+EOF
+                return 0
+                ;;
+            --*)
+                log_error "Unknown option: $1"
+                return 1
+                ;;
+            *)
+                log_error "Unexpected argument: $1"
+                return 1
+                ;;
+        esac
+    done
+
+    # Dry run mode for testing
+    if [[ "$dry_run" == true ]]; then
+        log_info "Dry run mode enabled"
+        if [[ "$bedrock_mode" == true ]]; then
+            log_info "Bedrock mode enabled"
+        fi
+        if [[ "$import_aws" == true ]]; then
+            log_info "AWS import enabled"
+        fi
+        return 0
+    fi
+
+    log_info "Starting devbox initialization..."
+
+    # Check if credential volume already exists
+    if docker volume inspect "$DEVBOX_VOLUME" >/dev/null 2>&1; then
+        log_warning "Credential volume '$DEVBOX_VOLUME' already exists"
+        log_info "Initialization may overwrite existing credentials"
+
+        # Prompt for confirmation
+        read -r -p "Continue with initialization? [y/N] " response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            log_info "Initialization cancelled"
+            return 0
+        fi
+    else
+        log_info "Creating credential volume '$DEVBOX_VOLUME'..."
+        if ! docker volume create "$DEVBOX_VOLUME" >/dev/null 2>&1; then
+            log_error "Failed to create credential volume"
+            return 1
+        fi
+        log_success "Credential volume created successfully"
+    fi
+
+    # Prepare environment variables for the init container
+    local init_env=""
+    if [[ "$bedrock_mode" == true ]]; then
+        init_env="$init_env -e BEDROCK_MODE=true"
+    fi
+    if [[ "$import_aws" == true ]]; then
+        init_env="$init_env -e IMPORT_AWS=true"
+    fi
+
+    # Mount host ~/.aws directory if importing AWS credentials
+    local aws_mount=""
+    if [[ "$import_aws" == true ]] && [[ -d "$HOME/.aws" ]]; then
+        aws_mount="-v $HOME/.aws:/host-aws:ro"
+    fi
+
+    log_info "Starting authentication container..."
+
+    # Run the initialization container
+    local container_cmd="docker run --rm -it \
+        -v $DEVBOX_VOLUME:/devbox-credentials \
+        $aws_mount \
+        $init_env \
+        $DEVBOX_IMAGE \
+        /init-credentials.sh"
+
+    log_info "Running: $container_cmd"
+
+    if eval "$container_cmd"; then
+        log_success "Devbox initialization completed successfully!"
+        echo
+        if [[ "$bedrock_mode" == true ]]; then
+            log_info "Mode: AWS Bedrock"
+            log_info "Claude Code will use AWS credentials for authentication"
+        else
+            log_info "Mode: Claude OAuth"
+            log_info "Claude Code will use OAuth tokens for authentication"
+        fi
+        echo
+        log_info "You can now create containers with: devbox create <name> <repo>"
+    else
+        log_error "Initialization failed"
+        return 1
+    fi
 }
 
 cmd_create() {
