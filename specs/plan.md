@@ -3,22 +3,22 @@
 ## Phase 1: Foundation
 
 ### Docker Image
-- [ ] Create `docker/Dockerfile` with Debian bookworm-slim base
-- [ ] Install system dependencies (curl, git, ca-certificates, xz-utils, sudo)
-- [ ] Install Nix via Determinate Systems installer (`--init none --no-confirm`)
-- [ ] Install GitHub CLI from official apt repo
-- [ ] Install Node.js 20.x from NodeSource
-- [ ] Install Claude Code via npm (`@anthropic-ai/claude-code`)
-- [ ] Create non-root `devbox` user
-- [ ] Test image builds on both amd64 and arm64
+- [x] Create `docker/Dockerfile` with Debian bookworm-slim base
+- [x] Install system dependencies (curl, git, ca-certificates, xz-utils, sudo)
+- [x] Install Nix via Determinate Systems installer (`--init none --no-confirm`)
+- [x] Install GitHub CLI from official apt repo
+- [x] Install Node.js 20.x from NodeSource
+- [x] Install Claude Code via npm (`@anthropic-ai/claude-code`)
+- [x] Create non-root `devbox` user
+- [x] Test image builds on arm64 (tested successfully on Apple Silicon)
 
 ### Entrypoint Script
-- [ ] Create `docker/entrypoint.sh`
-- [ ] Read `DEVBOX_REPO_URL` env var
-- [ ] Clone repo to `/workspace` if not present
-- [ ] Check for `flake.nix` or `shell.nix`, exit with error if missing
-- [ ] Enter Nix shell (`nix develop` or `nix-shell`)
-- [ ] Ensure shell stays open for attach (exec bash)
+- [x] Create `docker/entrypoint.sh`
+- [x] Read `DEVBOX_REPO_URL` env var
+- [x] Clone repo to `/workspace` if not present
+- [x] Check for `flake.nix` or `shell.nix`, exit with error if missing
+- [x] Enter Nix shell (`nix develop` or `nix-shell`)
+- [x] Ensure shell stays open for attach (exec bash)
 
 ### Credential Volume
 - [ ] Define volume structure: `gh/`, `claude/`, `aws/`
@@ -136,11 +136,11 @@
 ## Validation Checkpoints
 
 ### Checkpoint 1: Image Works
-- [ ] Image builds successfully
-- [ ] Can run container manually with `docker run -it`
-- [ ] Nix shell works inside container
-- [ ] `gh --version` works
-- [ ] `claude --version` works
+- [x] Image builds successfully
+- [x] Can run container manually with `docker run -it`
+- [x] Nix shell works inside container (verified with proper profile sourcing)
+- [x] `gh --version` works (v2.86.0)
+- [x] `claude --version` works (v2.1.19)
 
 ### Checkpoint 2: Auth Works
 - [ ] `devbox init` completes GitHub OAuth
