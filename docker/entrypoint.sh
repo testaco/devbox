@@ -12,18 +12,16 @@ fi
 
 cd "$REPO_DIR"
 
-# Set up Nix environment (single-user mode)
-# Try both profile locations for different installation types
-if [ -f /nix/var/nix/profiles/default/etc/profile.d/nix.sh ]; then
-    source /nix/var/nix/profiles/default/etc/profile.d/nix.sh
-elif [ -f /home/devbox/.nix-profile/etc/profile.d/nix.sh ]; then
+# Set up Nix environment (official single-user installation)
+if [ -f /home/devbox/.nix-profile/etc/profile.d/nix.sh ]; then
     source /home/devbox/.nix-profile/etc/profile.d/nix.sh
 fi
 
-# Add both potential Nix paths
-export PATH="/nix/var/nix/profiles/default/bin:/home/devbox/.nix-profile/bin:$PATH"
+# Ensure Nix is in PATH
+export PATH="/home/devbox/.nix-profile/bin:$PATH"
 
-# Ensure experimental features are enabled for this session
+# Experimental features should be read from ~/.config/nix/nix.conf
+# But also set via environment as fallback
 export NIX_CONFIG="experimental-features = nix-command flakes"
 
 # Verify Nix configuration exists

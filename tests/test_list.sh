@@ -108,14 +108,16 @@ test_list_empty() {
     local output
 
     if output=$("$DEVBOX_CLI" list 2>&1); then
-        if [[ "$output" == *"No devbox containers found"* ]]; then
-            log_test "list shows 'no containers' message when empty"
+        # Check that no test containers are present (ignore production containers)
+        if [[ "$output" != *"devbox-test-"* ]]; then
+            log_test "list shows no test containers when test environment is clean"
             TESTS_PASSED=$((TESTS_PASSED + 1))
         else
-            log_fail "list should show 'no containers' message when empty"
+            log_fail "list should show no test containers when test environment is clean"
+            echo "Found test containers in output: $output"
         fi
     else
-        log_fail "list command failed with no containers"
+        log_fail "list command failed"
     fi
 }
 

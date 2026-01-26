@@ -13,13 +13,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -s /bin/bash devbox && \
     echo "devbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Install Nix in single-user mode as devbox user
+# Install Nix using official installer for proper single-user setup
 USER devbox
 WORKDIR /home/devbox
-RUN curl --proto '=https' --tlsv1.2 -sSf -L \
-    https://install.determinate.systems/nix | sh -s -- install linux \
-    --init none --no-confirm --no-start-daemon \
-    --extra-conf "experimental-features = nix-command flakes"
+
+# Create Nix config directory and configure experimental features
+RUN mkdir -p /home/devbox/.config/nix && \
+    echo "experimental-features = nix-command flakes" > /home/devbox/.config/nix/nix.conf
+
+# Install Nix using official installer with single-user mode
+RUN curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
+
+# Ensure proper PATH setup for Nix
+ENV PATH="/home/devbox/.nix-profile/bin:$PATH"
 
 # Switch back to root for remaining setup
 USER root
