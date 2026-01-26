@@ -851,8 +851,117 @@ EOF
 }
 
 cmd_start() {
-    log_error "Command 'start' not yet implemented"
-    exit 1
+    local container_name=""
+    local dry_run=false
+
+    # Parse arguments and flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --help|-h)
+                cat << EOF
+devbox start - Start a stopped container
+
+USAGE:
+    devbox start <name|id> [options]
+
+ARGUMENTS:
+    <name|id>              Container name or ID to start
+
+OPTIONS:
+    --dry-run              Show what would be done without executing
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Starts a stopped container, preserving its configuration and workspace.
+    If the container is already running, this command will succeed gracefully.
+    The container will resume with all previous settings intact.
+
+EXAMPLES:
+    # Start container by name
+    devbox start myproject
+
+    # Start container by ID
+    devbox start a1b2c3d4
+
+NOTES:
+    - Only stopped containers can be started
+    - Running containers are handled gracefully
+    - All previous configuration and workspace data is preserved
+    - Use 'devbox attach' to connect to the started container
+
+EOF
+                return 0
+                ;;
+            --*)
+                log_error "Unknown option: $1"
+                return 1
+                ;;
+            *)
+                if [[ -z "$container_name" ]]; then
+                    container_name="$1"
+                else
+                    log_error "Too many arguments. Expected exactly 1 argument."
+                    return 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # Validate required arguments
+    if [[ -z "$container_name" ]]; then
+        log_error "Container name or ID is required"
+        log_error "Usage: devbox start <name|id>"
+        return 1
+    fi
+
+    # Resolve container name to ID
+    local container_id
+    if ! container_id=$(resolve_container "$container_name"); then
+        log_error "Container '$container_name' not found"
+        log_error "Use 'devbox list' to see available containers"
+        return 1
+    fi
+
+    # Get container display name for output
+    local display_name
+    display_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///' || echo "$container_name")
+    if [[ "$display_name" == devbox-test-* ]]; then
+        display_name="${display_name#devbox-test-}"
+    elif [[ "$display_name" == devbox-* ]]; then
+        display_name="${display_name#devbox-}"
+    fi
+
+    # Check current container status
+    local container_status
+    container_status=$(docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || echo "unknown")
+
+    # Dry run mode for testing
+    if [[ "$dry_run" == true ]]; then
+        echo "Would run: docker start $container_id"
+        echo "Container '$display_name' (${container_id:0:12}) current status: $container_status"
+        return 0
+    fi
+
+    # If already running, report success
+    if [[ "$container_status" == "running" ]]; then
+        log_success "Container '$display_name' is already running"
+        return 0
+    fi
+
+    log_info "Starting container '$display_name' (${container_id:0:12})"
+
+    # Start the container
+    if docker start "$container_id" >/dev/null 2>&1; then
+        log_success "Container '$display_name' started successfully"
+    else
+        log_error "Failed to start container '$display_name'"
+        return 1
+    fi
 }
 
 cmd_rm() {

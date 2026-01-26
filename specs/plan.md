@@ -106,8 +106,11 @@
 - [x] Complete test suite with 8 comprehensive tests
 
 ### `devbox start <name-or-id>`
-- [ ] Resolve name to container ID
-- [ ] Run `docker start`
+- [x] Resolve name to container ID
+- [x] Run `docker start`
+- [x] Comprehensive help text with examples
+- [x] Full flag parsing (--help, --dry-run)
+- [x] Complete test suite with 9 comprehensive tests
 
 ### `devbox rm <name-or-id>`
 - [ ] Parse `--force` flag
