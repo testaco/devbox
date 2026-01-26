@@ -248,8 +248,18 @@ EOF
 
     log_info "Starting authentication container..."
 
-    # Run the initialization container
-    local container_cmd="docker run --rm -it \
+    # First fix volume permissions, then run init script
+    log_info "Setting up volume permissions..."
+    docker run --rm \
+        --user root \
+        --entrypoint '' \
+        -v "$DEVBOX_VOLUME:/devbox-credentials" \
+        "$DEVBOX_IMAGE" \
+        chown devbox:devbox /devbox-credentials
+
+    # Run the initialization container (override entrypoint to skip repo cloning)
+    local container_cmd="docker run --rm \
+        --entrypoint '' \
         -v $DEVBOX_VOLUME:/devbox-credentials \
         $aws_mount \
         $init_env \

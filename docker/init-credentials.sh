@@ -3,29 +3,16 @@ set -euo pipefail
 
 # Credential initialization script for devbox
 # This script runs inside a container to set up the credential volume
-# It should be run as root initially, then switches to devbox user
 
 echo "=== Devbox Credential Initialization ==="
 
-# Ensure we're running as root for initial setup
-if [[ $EUID -ne 0 ]]; then
-    echo "This script must be run as root for initial setup"
-    exit 1
-fi
-
-# Create directory structure with proper permissions
+# Create directory structure (will be owned by current user)
 echo "Setting up credential directory structure..."
 mkdir -p /devbox-credentials/gh
 mkdir -p /devbox-credentials/claude
 mkdir -p /devbox-credentials/aws
 
-# Change ownership to devbox user
-chown -R devbox:devbox /devbox-credentials
-
 echo "✓ Directory structure created"
-
-# Switch to devbox user for authentication
-exec sudo -u devbox bash << 'EOF'
 
 # Set environment variables for tools to use the credential directories
 export GH_CONFIG_DIR=/devbox-credentials/gh
@@ -113,5 +100,3 @@ else
     echo "Mode: Claude OAuth"
     echo "Authentication: GitHub CLI + Claude OAuth"
 fi
-
-EOF

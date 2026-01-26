@@ -29,6 +29,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Note: Anthropic recommends native installer, but npm works reliably in containers
 RUN npm install -g @anthropic-ai/claude-code
 
+# Copy scripts (as root for proper permissions)
+COPY entrypoint.sh /entrypoint.sh
+COPY init-credentials.sh /init-credentials.sh
+RUN chmod +x /entrypoint.sh /init-credentials.sh
+
 # Create non-root user and add to sudoers
 RUN useradd -m -s /bin/bash devbox && \
     echo "devbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
@@ -36,5 +41,4 @@ USER devbox
 WORKDIR /home/devbox
 
 # Entrypoint handles repo clone and nix shell
-COPY entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
