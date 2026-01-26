@@ -403,14 +403,61 @@ main() {
 - **User Experience Consistency**: Start and stop commands should have symmetrical help text, error messages, and behavior patterns
 - **Integration Testing**: Container lifecycle commands require Docker integration testing with proper cleanup mechanisms
 
+### Completed: `devbox rm` Command ✅
+
+**Status**: Complete with comprehensive testing and full functionality
+
+**Implementation Highlights**:
+- Complete container lifecycle management with support for both stopped and running containers
+- Force removal capability (`--force` flag) for running containers with proper safety checks
+- Automatic workspace volume cleanup to prevent orphaned volumes
+- Comprehensive flag parsing with help text, dry-run mode, and error handling
+- Container state validation ensuring appropriate removal behavior
+- Enhanced container resolution using established patterns from other lifecycle commands
+
+**Testing Strategy**:
+- Created dedicated `test_rm.sh` with 10 comprehensive tests covering:
+  - Help text validation and flag parsing
+  - Missing argument handling with proper error messages
+  - Nonexistent container error handling
+  - Stopped container removal with workspace volume cleanup
+  - Running container protection (blocked without --force)
+  - Force removal of running containers
+  - Container ID resolution (both name and partial ID)
+  - Dry-run mode for safe testing
+  - Extra arguments rejection
+  - Force flag combined with dry-run mode
+- All tests pass with proper container and volume lifecycle management
+- Advanced test infrastructure with separate container and volume tracking
+
+**Key Technical Learnings**:
+- **Workspace Volume Management**: Docker containers created via `devbox create` use named volumes for workspace persistence; these must be cleaned up during removal
+- **Force Removal Safety**: The `--force` flag should only apply `-f` to `docker rm` when the container is actually running
+- **Volume Discovery**: Using `docker inspect` with Go templates to extract mounted volume names enables automatic cleanup
+- **Destructive Operation UX**: Clear warnings in help text about irreversible actions improve user experience
+- **Resource Cleanup**: Container removal commands need to handle both container and associated volume cleanup
+- **State-Dependent Behavior**: Different removal approaches (normal vs force) based on container runtime state
+
+**Advanced Docker Patterns Established**:
+- **Volume Inspection**: `docker inspect --format '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Name}}{{end}}{{end}}'` for volume discovery
+- **Conditional Force Removal**: Dynamic `docker rm` arguments based on container state and user flags
+- **Resource Cleanup Chains**: Sequential removal of containers followed by associated volumes
+- **Test Volume Management**: Separate tracking arrays for containers and volumes in test cleanup
+
+**Container Lifecycle Completion**:
+- Full container lifecycle now implemented: create → list → attach → stop → start → rm
+- Consistent patterns established across all lifecycle commands
+- Complete test coverage with integration testing for all operations
+- Pre-commit hook integration ensures all commands remain functional
+
 ## Next Priority Tasks
 
-Based on current progress with init, list, create, attach, stop, and start completed, the next highest-leverage tasks are:
+Based on current progress with basic container lifecycle management complete (init, list, create, attach, stop, start, rm), the next highest-leverage tasks are:
 
-1. **Implement `devbox rm` command** - Complete basic container lifecycle management with removal functionality
-2. **Add end-to-end authentication testing** - Validate full init→create→attach flow with real repositories
-3. **Implement additional commands** - `logs`, `exec`, `ports` for enhanced container management
-4. **End-to-end workflow validation** - Test complete development workflow with real repositories
+1. **Add end-to-end authentication testing** - Validate full init→create→attach flow with real repositories
+2. **Implement additional commands** - `logs`, `exec`, `ports` for enhanced container management
+3. **End-to-end workflow validation** - Test complete development workflow with real repositories
+4. **Polish and error handling** - Enhanced error messages, progress indicators, and user experience improvements
 
 ## Lessons for Future Agent Development
 

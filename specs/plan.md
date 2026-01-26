@@ -113,10 +113,14 @@
 - [x] Complete test suite with 9 comprehensive tests
 
 ### `devbox rm <name-or-id>`
-- [ ] Parse `--force` flag
-- [ ] Resolve name to container ID
-- [ ] Check if running (error unless --force)
-- [ ] Run `docker rm` (with `-f` if forced)
+- [x] Parse `--force` flag
+- [x] Resolve name to container ID
+- [x] Check if running (error unless --force)
+- [x] Run `docker rm` (with `-f` if forced)
+- [x] Comprehensive help text with examples
+- [x] Full flag parsing (--help, --dry-run, --force)
+- [x] Workspace volume cleanup (removes associated volumes)
+- [x] Complete test suite with 10 comprehensive tests
 
 ---
 
