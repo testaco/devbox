@@ -45,7 +45,7 @@
 - [x] Create unit tests for basic functionality
 
 ### Test Infrastructure & Pre-commit Hooks
-- [x] Create comprehensive test suite (`tests/test_cli_basic.sh`, `tests/test_init.sh`)
+- [x] Create comprehensive test suite (`tests/test_cli_basic.sh`, `tests/test_init.sh`, `tests/test_list.sh`, `tests/test_create.sh`)
 - [x] Move `PROMPT` to `PROMPT.md` and ensure it's committed
 - [x] Setup pre-commit hook that runs all tests
   - [x] Create `.git/hooks/pre-commit` script that:
@@ -53,6 +53,7 @@
     - [x] Runs `tests/test_cli_basic.sh` with colored output
     - [x] Runs `tests/test_init.sh` with colored output
     - [x] Runs `tests/test_list.sh` with colored output
+    - [x] Runs `tests/test_create.sh` with colored output
     - [x] Tracks overall success/failure across all test suites
     - [x] Provides clear success/failure messages
     - [x] Exits with code 1 (abort commit) if any tests fail
@@ -73,18 +74,18 @@
 - [x] Print success message with mode (oauth/bedrock)
 
 ### `devbox create <name> <repo>`
-- [ ] Parse `--port` flag (repeatable)
-- [ ] Parse `--bedrock` flag
-- [ ] Parse `--aws-profile` flag
-- [ ] Validate name doesn't already exist
-- [ ] Build docker run command with:
-  - [ ] Container name with prefix (`devbox-<name>`)
-  - [ ] Credential volume mount (read-only)
-  - [ ] Port mappings
-  - [ ] Environment variables (repo URL, AWS profile, bedrock flag)
-  - [ ] Detached mode with TTY (`-dit`)
-- [ ] Store metadata (repo, mode, ports) as container labels
-- [ ] Print success message
+- [x] Parse `--port` flag (repeatable)
+- [x] Parse `--bedrock` flag
+- [x] Parse `--aws-profile` flag
+- [x] Validate name doesn't already exist
+- [x] Build docker run command with:
+  - [x] Container name with prefix (`devbox-<name>`)
+  - [x] Credential volume mount (read-only)
+  - [x] Port mappings
+  - [x] Environment variables (repo URL, AWS profile, bedrock flag)
+  - [x] Detached mode with TTY (`-dit`)
+- [x] Store metadata (repo, mode, ports) as container labels
+- [x] Print success message
 
 ### `devbox list`
 - [x] Query Docker for containers with devbox prefix

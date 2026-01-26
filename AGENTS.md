@@ -223,14 +223,56 @@ main() {
 - Consistent table output formatting approach
 - Test container management patterns for integration testing
 
+### Completed: `devbox create` Command ✅
+
+**Status**: Complete with comprehensive testing and full functionality
+
+**Implementation Highlights**:
+- Complex argument and flag parsing supporting positional args and repeatable flags (`--port`)
+- Comprehensive Docker command generation with all required environment variables
+- Container name conflict detection across both production and test prefixes
+- Metadata storage using Docker labels for persistence across container lifecycles
+- Dry-run mode for safe testing and validation
+- Robust authentication mode support (OAuth vs Bedrock) with appropriate environment configuration
+- Workspace volume creation for persistent project storage
+
+**Testing Strategy**:
+- Created dedicated `test_create.sh` with 9 comprehensive tests covering:
+  - Help text validation with all flags documented
+  - Required argument validation (name and repository URL)
+  - Invalid flag rejection with proper error messages
+  - Basic container creation in dry-run mode
+  - Multiple port mapping handling
+  - Bedrock authentication mode configuration
+  - Container name conflict detection and prevention
+  - Complex multi-flag combinations
+- Dry-run testing pattern enables safe validation of Docker commands without side effects
+- Container tracking and cleanup for integration tests
+
+**Key Technical Learnings**:
+- **Complex flag parsing**: Bash arrays for repeatable flags (`ports=()`) with proper validation
+- **Docker command construction**: String building approach allows flexible, readable command generation
+- **Environment variable forwarding**: Careful handling of authentication modes (OAuth vs Bedrock) with appropriate env vars
+- **Container name validation**: Essential to check both production and test prefixes to prevent conflicts
+- **Dry-run patterns**: `--dry-run` flags enable comprehensive testing without side effects
+- **Metadata persistence**: Docker labels provide reliable storage for container configuration that survives container lifecycle
+- **Workspace volumes**: Named volumes (`${container_name}-workspace`) provide persistent project storage
+
+**Advanced Bash Patterns Established**:
+- **Repeatable flag handling**: `ports+=("$2")` pattern for accumulating multiple values
+- **Conditional string building**: Environment variables and Docker args constructed conditionally based on flags
+- **Array-to-string conversion**: `IFS=,; echo "${ports[*]}"` for comma-separated label values
+- **Command validation**: Pre-execution validation (credential volume exists, name conflicts) prevents partial failures
+- **Test-aware implementations**: Code that handles both production and test environment prefixes
+
 ## Next Priority Tasks
 
-Based on current progress with both init and list completed, the next highest-leverage tasks are:
+Based on current progress with init, list, and create completed, the next highest-leverage tasks are:
 
-1. **Implement `devbox create`** - Core functionality for container creation and lifecycle management
-2. **Implement container lifecycle commands** - `attach`, `stop`, `start`, `rm` to enable complete workflow
-3. **Add end-to-end authentication testing** - Validate full init flow with real GitHub/Claude auth
-4. **Implement additional commands** - `logs`, `exec`, `ports` for enhanced container management
+1. **Implement container lifecycle commands** - `attach`, `stop`, `start`, `rm` to enable complete workflow
+2. **Add end-to-end authentication testing** - Validate full init→create→attach flow with real repositories
+3. **Implement additional commands** - `logs`, `exec`, `ports` for enhanced container management
+4. **End-to-end workflow validation** - Test complete development workflow with real repositories
 
 ## Lessons for Future Agent Development
 

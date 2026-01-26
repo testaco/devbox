@@ -73,7 +73,7 @@ fi
 
 # Test 6: Unimplemented commands show appropriate error
 run_test "Unimplemented commands show not implemented error"
-OUTPUT=$("$DEVBOX_BIN" create 2>&1 || true)
+OUTPUT=$("$DEVBOX_BIN" attach 2>&1 || true)
 if echo "$OUTPUT" | grep -q "not yet implemented"; then
     test_passed "Unimplemented commands show appropriate error"
 else

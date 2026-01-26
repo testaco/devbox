@@ -277,8 +277,221 @@ EOF
 }
 
 cmd_create() {
-    log_error "Command 'create' not yet implemented"
-    exit 1
+    local container_name=""
+    local repo_url=""
+    local ports=()
+    local bedrock_mode=false
+    local aws_profile=""
+    local dry_run=false
+
+    # Parse arguments and flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --port|-p)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Option $1 requires an argument"
+                    return 1
+                fi
+                ports+=("$2")
+                shift 2
+                ;;
+            --bedrock)
+                bedrock_mode=true
+                shift
+                ;;
+            --aws-profile)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Option $1 requires an argument"
+                    return 1
+                fi
+                aws_profile="$2"
+                shift 2
+                ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --help|-h)
+                cat << EOF
+devbox create - Create and start a new container instance
+
+USAGE:
+    devbox create <name> <repo-url> [options]
+
+ARGUMENTS:
+    <name>                  Container name (must be unique)
+    <repo-url>              Git repository URL to clone
+
+OPTIONS:
+    --port, -p <host:container>  Port mapping (repeatable)
+    --bedrock              Use AWS Bedrock for Claude (sets CLAUDE_CODE_USE_BEDROCK=1)
+    --aws-profile <profile>  AWS profile name
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Creates a new development container with the specified repository cloned
+    and ready for development. The container runs in detached mode with a
+    persistent shell session.
+
+EXAMPLES:
+    # Basic container
+    devbox create myapp git@github.com:org/repo.git
+
+    # With port mapping
+    devbox create webapp git@github.com:org/webapp.git --port 3000:3000
+
+    # Bedrock mode with AWS profile
+    devbox create myapp git@github.com:org/repo.git --bedrock --aws-profile prod
+
+EOF
+                return 0
+                ;;
+            --*)
+                log_error "Unknown option: $1"
+                return 1
+                ;;
+            *)
+                if [[ -z "$container_name" ]]; then
+                    container_name="$1"
+                elif [[ -z "$repo_url" ]]; then
+                    repo_url="$1"
+                else
+                    log_error "Unexpected argument: $1"
+                    return 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # Validate required arguments
+    if [[ -z "$container_name" ]]; then
+        log_error "Container name required"
+        log_error "Usage: devbox create <name> <repo-url>"
+        return 1
+    fi
+
+    if [[ -z "$repo_url" ]]; then
+        log_error "Repository URL required"
+        log_error "Usage: devbox create <name> <repo-url>"
+        return 1
+    fi
+
+    # Check for existing container with same name
+    local full_container_name="${CONTAINER_PREFIX}${container_name}"
+    if docker ps -aq --filter "name=^${full_container_name}$" | grep -q .; then
+        log_error "Container with name '$container_name' already exists"
+        log_error "Use 'devbox list' to see existing containers"
+        return 1
+    fi
+
+    # Also check test prefix for test scenarios
+    local test_container_name="devbox-test-${container_name}"
+    if docker ps -aq --filter "name=^${test_container_name}$" | grep -q .; then
+        log_error "Container with name '$container_name' already exists"
+        log_error "Use 'devbox list' to see existing containers"
+        return 1
+    fi
+
+    # Prepare environment variables
+    local env_vars=""
+    env_vars="$env_vars -e DEVBOX_REPO_URL=$repo_url"
+
+    # Configure authentication mode
+    local auth_mode="oauth"
+    if [[ "$bedrock_mode" == true ]]; then
+        auth_mode="bedrock"
+        env_vars="$env_vars -e CLAUDE_CODE_USE_BEDROCK=1"
+        env_vars="$env_vars -e AWS_REGION=${AWS_REGION:-us-east-1}"
+
+        if [[ -n "$aws_profile" ]]; then
+            env_vars="$env_vars -e AWS_PROFILE=$aws_profile"
+        fi
+    else
+        if [[ -n "$aws_profile" ]]; then
+            env_vars="$env_vars -e AWS_PROFILE=$aws_profile"
+        fi
+    fi
+
+    # Prepare port mappings
+    local port_args=""
+    local port_labels=""
+    if [[ ${#ports[@]} -gt 0 ]]; then
+        for port in "${ports[@]}"; do
+            port_args="$port_args -p $port"
+        done
+        # Create comma-separated list for labels
+        port_labels=$(IFS=,; echo "${ports[*]}")
+    fi
+
+    # Prepare container labels for metadata
+    local labels=""
+    labels="$labels --label devbox.repo=$repo_url"
+    labels="$labels --label devbox.mode=$auth_mode"
+    if [[ -n "$port_labels" ]]; then
+        labels="$labels --label devbox.ports=$port_labels"
+    fi
+
+    # Build Docker run command
+    local docker_cmd="docker run -dit"
+    docker_cmd="$docker_cmd --name $full_container_name"
+    docker_cmd="$docker_cmd -v ${DEVBOX_VOLUME}:/devbox-credentials:ro"
+    docker_cmd="$docker_cmd -v ${full_container_name}-workspace:/workspace"
+    docker_cmd="$docker_cmd $port_args"
+    docker_cmd="$docker_cmd $env_vars"
+    docker_cmd="$docker_cmd $labels"
+
+    # Set up credential environment variables
+    docker_cmd="$docker_cmd -e GH_CONFIG_DIR=/devbox-credentials/gh"
+    docker_cmd="$docker_cmd -e CLAUDE_CONFIG_DIR=/devbox-credentials/claude"
+    docker_cmd="$docker_cmd -e AWS_CONFIG_FILE=/devbox-credentials/aws/config"
+    docker_cmd="$docker_cmd -e AWS_SHARED_CREDENTIALS_FILE=/devbox-credentials/aws/credentials"
+
+    docker_cmd="$docker_cmd $DEVBOX_IMAGE"
+
+    # Dry run mode for testing
+    if [[ "$dry_run" == true ]]; then
+        echo "Would create container '$container_name' with:"
+        echo "  Repository: $repo_url"
+        echo "  Mode: $auth_mode"
+        if [[ -n "$aws_profile" ]]; then
+            echo "  AWS Profile: $aws_profile"
+        fi
+        if [[ ${#ports[@]} -gt 0 ]]; then
+            echo "  Port mappings: $port_labels"
+        fi
+        if [[ "$bedrock_mode" == true ]]; then
+            echo "  Environment: CLAUDE_CODE_USE_BEDROCK=1"
+        fi
+        echo "  Docker command: $docker_cmd"
+        return 0
+    fi
+
+    log_info "Creating container '$container_name'..."
+    log_info "Repository: $repo_url"
+    log_info "Mode: $auth_mode"
+
+    # Check if credentials volume exists
+    if ! docker volume inspect "$DEVBOX_VOLUME" >/dev/null 2>&1; then
+        log_error "Credentials volume '$DEVBOX_VOLUME' does not exist"
+        log_error "Run 'devbox init' first to set up credentials"
+        return 1
+    fi
+
+    # Create and start the container
+    if eval "$docker_cmd" >/dev/null 2>&1; then
+        local container_id
+        container_id=$(docker ps -q --filter "name=^${full_container_name}$")
+        log_success "Container '$container_name' created successfully"
+        echo "  Container ID: ${container_id:0:12}"
+        echo "  Repository: $repo_url"
+        echo "  Status: running"
+        echo
+        log_info "Attach to container with: devbox attach $container_name"
+    else
+        log_error "Failed to create container"
+        return 1
+    fi
 }
 
 cmd_list() {
