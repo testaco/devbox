@@ -47,17 +47,19 @@
 ### Test Infrastructure & Pre-commit Hooks
 - [x] Create comprehensive test suite (`tests/test_cli_basic.sh`, `tests/test_init.sh`)
 - [x] Move `PROMPT` to `PROMPT.md` and ensure it's committed
-- [ ] Setup pre-commit hook that runs all tests
-  - [ ] Create `.git/hooks/pre-commit` script that:
-    - [ ] Changes to repository root directory
-    - [ ] Runs `tests/test_cli_basic.sh` with colored output
-    - [ ] Runs `tests/test_init.sh` with colored output
-    - [ ] Tracks overall success/failure across all test suites
-    - [ ] Provides clear success/failure messages
-    - [ ] Exits with code 1 (abort commit) if any tests fail
-    - [ ] Exits with code 0 (allow commit) if all tests pass
-  - [ ] Make hook executable (`chmod +x .git/hooks/pre-commit`)
-  - [ ] Test hook by making a test commit
+- [x] Setup pre-commit hook that runs all tests
+  - [x] Create `.git/hooks/pre-commit` script that:
+    - [x] Changes to repository root directory
+    - [x] Runs `tests/test_cli_basic.sh` with colored output
+    - [x] Runs `tests/test_init.sh` with colored output
+    - [x] Runs `tests/test_list.sh` with colored output
+    - [x] Tracks overall success/failure across all test suites
+    - [x] Provides clear success/failure messages
+    - [x] Exits with code 1 (abort commit) if any tests fail
+    - [x] Exits with code 0 (allow commit) if all tests pass
+  - [x] Make hook executable (`chmod +x .git/hooks/pre-commit`)
+  - [x] Test hook by making a test commit
+  - [x] Fix test counting logic to properly handle skipped tests
   - [ ] Add instructions in README for hook setup on new clones
 
 ### `devbox init`

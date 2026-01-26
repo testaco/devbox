@@ -36,9 +36,18 @@ log_info() {
 # Cleanup function
 cleanup() {
     log_info "Cleaning up test containers..."
+    # Clean up tracked containers
     for container in "${CLEANUP_CONTAINERS[@]}"; do
         docker rm -f "$container" >/dev/null 2>&1 || true
     done
+    # Also clean up any leftover devbox-test- containers
+    docker ps -aq --filter "name=devbox-test-" | xargs -r docker rm -f >/dev/null 2>&1 || true
+}
+
+# Initial cleanup function to remove any leftover containers from previous runs
+initial_cleanup() {
+    log_info "Cleaning up any leftover test containers from previous runs..."
+    docker ps -aq --filter "name=devbox-test-" | xargs -r docker rm -f >/dev/null 2>&1 || true
 }
 
 # Set up trap for cleanup
@@ -248,6 +257,9 @@ main() {
     fi
 
     # Alpine image should be available or will be pulled automatically
+
+    # Clean up any leftover containers from previous runs
+    initial_cleanup
 
     # Run tests
     test_list_help

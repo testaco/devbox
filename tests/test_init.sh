@@ -10,6 +10,7 @@ readonly NC='\033[0m' # No Color
 # Test counters
 TESTS_RUN=0
 TESTS_PASSED=0
+TESTS_SKIPPED=0
 
 # Helper functions
 test_passed() {
@@ -23,6 +24,7 @@ test_failed() {
 
 test_skipped() {
     echo -e "${YELLOW}⚠ SKIP:${NC} $1"
+    ((TESTS_SKIPPED++))
 }
 
 run_test() {
@@ -163,12 +165,15 @@ echo
 echo "Test Summary:"
 echo "Tests run: $TESTS_RUN"
 echo "Tests passed: $TESTS_PASSED"
+if [[ $TESTS_SKIPPED -gt 0 ]]; then
+    echo "Tests skipped: $TESTS_SKIPPED"
+fi
 
-if [[ $TESTS_PASSED -eq $TESTS_RUN ]]; then
+TESTS_FAILED=$((TESTS_RUN - TESTS_PASSED - TESTS_SKIPPED))
+if [[ $TESTS_FAILED -eq 0 ]]; then
     echo -e "${GREEN}All tests passed!${NC}"
     exit 0
 else
-    TESTS_FAILED=$((TESTS_RUN - TESTS_PASSED))
     echo -e "${RED}$TESTS_FAILED tests failed${NC}"
     exit 1
 fi
