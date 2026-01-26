@@ -498,6 +498,15 @@ EOF
         return 1
     fi
 
+    # Fix workspace volume permissions (similar to credentials volume fix in cmd_init)
+    log_info "Setting up workspace volume permissions..."
+    docker run --rm \
+        --user root \
+        --entrypoint '' \
+        -v "${full_container_name}-workspace:/workspace" \
+        "$DEVBOX_IMAGE" \
+        chown devbox:devbox /workspace
+
     # Create and start the container
     if eval "$docker_cmd" >/dev/null 2>&1; then
         local container_id
