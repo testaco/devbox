@@ -33,11 +33,16 @@
 ## Phase 2: CLI Core
 
 ### Script Setup
-- [ ] Create `bin/devbox` bash script
-- [ ] Add shebang and strict mode (`set -euo pipefail`)
-- [ ] Define constants (image name, volume name, container prefix)
-- [ ] Add usage/help function
-- [ ] Add command dispatcher (case statement)
+- [x] Create `bin/devbox` bash script
+- [x] Add shebang and strict mode (`set -euo pipefail`)
+- [x] Define constants (image name, volume name, container prefix)
+- [x] Add usage/help function
+- [x] Add command dispatcher (case statement)
+- [x] Add colored output and logging functions
+- [x] Add Docker daemon check
+- [x] Add base image building
+- [x] Add container name resolution helper
+- [x] Create unit tests for basic functionality
 
 ### `devbox init`
 - [ ] Check if credentials volume exists, create if not
