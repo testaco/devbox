@@ -29,8 +29,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Note: Anthropic recommends native installer, but npm works reliably in containers
 RUN npm install -g @anthropic-ai/claude-code
 
-# Create non-root user
-RUN useradd -m -s /bin/bash devbox
+# Create non-root user and add to sudoers
+RUN useradd -m -s /bin/bash devbox && \
+    echo "devbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 USER devbox
 WORKDIR /home/devbox
 

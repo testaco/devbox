@@ -21,12 +21,12 @@
 - [x] Ensure shell stays open for attach (exec bash)
 
 ### Credential Volume
-- [ ] Define volume structure: `gh/`, `claude/`, `aws/`
-- [ ] Create init container script that mounts volume read-write
-- [ ] Verify `GH_CONFIG_DIR` env var works for GitHub CLI
-- [ ] Verify `CLAUDE_CONFIG_DIR` env var works for Claude Code (or find correct var)
-- [ ] Verify `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` work
-- [ ] Test read-only mount in work containers
+- [x] Define volume structure: `gh/`, `claude/`, `aws/`
+- [x] Create init container script that mounts volume read-write
+- [x] Verify `GH_CONFIG_DIR` env var works for GitHub CLI
+- [x] Verify `CLAUDE_CONFIG_DIR` env var works for Claude Code (or find correct var)
+- [x] Verify `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` work
+- [x] Test read-only mount in work containers
 
 ---
 
@@ -143,10 +143,13 @@
 - [x] `claude --version` works (v2.1.19)
 
 ### Checkpoint 2: Auth Works
-- [ ] `devbox init` completes GitHub OAuth
-- [ ] `devbox init` completes Claude OAuth (non-bedrock)
-- [ ] `devbox init --bedrock` skips Claude OAuth
-- [ ] AWS credentials imported correctly
+- [x] Credential volume structure and permissions validated
+- [x] Environment variables (GH_CONFIG_DIR, CLAUDE_CONFIG_DIR, AWS_*) working
+- [x] Read-only credential mounting working
+- [ ] `devbox init` completes GitHub OAuth (requires CLI implementation)
+- [ ] `devbox init` completes Claude OAuth (non-bedrock) (requires CLI implementation)
+- [ ] `devbox init --bedrock` skips Claude OAuth (requires CLI implementation)
+- [ ] AWS credentials imported correctly (requires CLI implementation)
 - [ ] Credentials persist in volume across container restarts
 
 ### Checkpoint 3: Workflow Works
