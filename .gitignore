@@ -1,0 +1,30 @@
+# Nix
+result
+result-*
+.direnv/
+
+# Development artifacts
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# Docker build artifacts
+.docker/
+
+# macOS
+.DS_Store
+
+# Editor artifacts
+.vscode/
+.idea/
+*.sublime-*
+
+# Test artifacts
+test-output/
+*.test.log
+
+# Local development overrides
+.envrc.local
+docker-compose.override.yml
