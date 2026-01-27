@@ -5,9 +5,16 @@ REPO_URL="${DEVBOX_REPO_URL}"
 REPO_DIR="/workspace"
 
 # Set up Claude configuration directory
+echo "Setting up Claude configuration..."
+mkdir -p ~/.claude
+
+if [ -f "/devbox-credentials/claude/.credentials.json" ]; then
+    cp /devbox-credentials/claude/.credentials.json ~/.claude/.credentials.json
+    chmod 600 ~/.claude/.credentials.json
+    echo "✓ Claude credentials copied to ~/.claude"
+fi
+
 if [ -f "/devbox-credentials/claude/settings.json" ]; then
-    echo "Setting up Claude configuration..."
-    mkdir -p ~/.claude
     cp /devbox-credentials/claude/settings.json ~/.claude/settings.json
     echo "✓ Claude settings.json copied to ~/.claude"
 fi

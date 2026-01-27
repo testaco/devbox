@@ -36,42 +36,59 @@ else
     exit 1
 fi
 
+# Claude configuration import (before authentication)
+echo "=== Checking Claude Configuration ==="
+# Check if credentials already exist (may have been copied as root earlier)
+if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
+    echo "✓ Claude credentials already present"
+    ls -la /devbox-credentials/claude/.credentials.json
+elif [[ -f /host-claude/.credentials.json ]]; then
+    echo "Copying Claude credentials from host..."
+    cp /host-claude/.credentials.json /devbox-credentials/claude/.credentials.json 2>/dev/null || {
+        echo "Note: Credentials will be imported by root process"
+    }
+fi
+
+if [[ -f /devbox-credentials/claude/settings.json ]]; then
+    echo "✓ Claude settings already present"
+elif [[ -f /host-claude/settings.json ]]; then
+    echo "Copying Claude settings.json from host..."
+    cp /host-claude/settings.json /devbox-credentials/claude/settings.json 2>/dev/null || {
+        echo "Note: Settings will be imported by root process"
+    }
+fi
+
 # Claude authentication (only if not in Bedrock mode)
 if [[ "${BEDROCK_MODE:-false}" != "true" ]]; then
-    echo "=== Claude Code Authentication ==="
-    echo "Please authenticate with Claude Code..."
-    echo "This will open a browser window for OAuth authentication."
-
-    # Claude Code authentication - just run claude to trigger OAuth flow
-    claude --version >/dev/null || {
-        echo "Starting Claude Code authentication..."
-        # Claude Code will handle the OAuth flow when first run
-        claude || {
-            echo "✗ Claude Code authentication failed"
-            exit 1
-        }
-    }
-
+    # Check if credentials were already imported from host
     if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
-        echo "✓ Claude Code authentication successful"
+        echo "=== Claude Code Authentication ==="
+        echo "✓ Claude credentials already imported from host system"
     else
-        echo "✗ Claude Code authentication failed - no credentials file found"
-        exit 1
+        echo "=== Claude Code Authentication ==="
+        echo "Please authenticate with Claude Code..."
+        echo "This will open a browser window for OAuth authentication."
+
+        # Claude Code authentication - just run claude to trigger OAuth flow
+        claude --version >/dev/null || {
+            echo "Starting Claude Code authentication..."
+            # Claude Code will handle the OAuth flow when first run
+            claude || {
+                echo "✗ Claude Code authentication failed"
+                exit 1
+            }
+        }
+
+        if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
+            echo "✓ Claude Code authentication successful"
+        else
+            echo "✗ Claude Code authentication failed - no credentials file found"
+            exit 1
+        fi
     fi
 else
     echo "=== Skipping Claude OAuth (Bedrock mode) ==="
     echo "AWS Bedrock mode enabled - Claude authentication will use AWS credentials"
-fi
-
-# Claude configuration setup
-echo "=== Importing Claude Configuration ==="
-if [[ -f /host-claude/settings.json ]]; then
-    echo "Copying Claude settings.json from host..."
-    cp /host-claude/settings.json /devbox-credentials/claude/settings.json
-    echo "✓ Claude settings.json imported"
-    ls -la /devbox-credentials/claude/settings.json
-else
-    echo "No Claude settings.json found on host - will be created as needed"
 fi
 
 # AWS credentials setup

@@ -263,9 +263,9 @@ EOF
         aws_mount="-v $HOME/.aws:/host-aws:ro"
     fi
 
-    # Mount host ~/.claude directory if settings.json exists for importing
+    # Mount host ~/.claude directory if settings.json or credentials exist for importing
     local claude_mount=""
-    if [[ -f "$HOME/.claude/settings.json" ]]; then
+    if [[ -f "$HOME/.claude/settings.json" ]] || [[ -f "$HOME/.claude/.credentials.json" ]]; then
         claude_mount="-v $HOME/.claude:/host-claude:ro"
     fi
 
@@ -279,6 +279,27 @@ EOF
         -v "$DEVBOX_VOLUME:/devbox-credentials" \
         "$DEVBOX_IMAGE" \
         chown devbox:devbox /devbox-credentials
+
+    # Copy Claude credentials as root if they exist (to handle permission issues)
+    if [[ -f "$HOME/.claude/.credentials.json" ]] || [[ -f "$HOME/.claude/settings.json" ]]; then
+        log_info "Importing Claude credentials from host..."
+        docker run --rm \
+            --user root \
+            --entrypoint '' \
+            -v "$DEVBOX_VOLUME:/devbox-credentials" \
+            -v "$HOME/.claude:/host-claude:ro" \
+            "$DEVBOX_IMAGE" \
+            bash -c 'mkdir -p /devbox-credentials/claude && \
+                     if [ -f /host-claude/.credentials.json ]; then \
+                         cp /host-claude/.credentials.json /devbox-credentials/claude/.credentials.json && \
+                         echo "✓ Credentials copied"; \
+                     fi && \
+                     if [ -f /host-claude/settings.json ]; then \
+                         cp /host-claude/settings.json /devbox-credentials/claude/settings.json && \
+                         echo "✓ Settings copied"; \
+                     fi && \
+                     chown -R devbox:devbox /devbox-credentials/claude'
+    fi
 
     # Run the initialization container (override entrypoint to skip repo cloning)
     local container_cmd="docker run --rm \
