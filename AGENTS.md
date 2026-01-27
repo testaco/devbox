@@ -379,6 +379,65 @@ fi
 - Make tests resilient to partial failures in previous runs
 - Cleanup at start AND end of test suites
 
+### Error Handling in Container Entrypoints
+
+**Learning**: Container entrypoint scripts should provide comprehensive, actionable error messages when operations fail.
+
+**Problem**: Users running containers face opaque failures when repositories fail to clone, configurations are missing, or environments fail to initialize. Default error messages from tools like `gh`, `git`, or `nix` are often cryptic.
+
+**Solution**: Wrap critical operations in error handling that provides:
+1. Clear visual separation (unicode box drawing characters)
+2. Specific error context (what failed, what was expected)
+3. Possible causes in bullet format
+4. Step-by-step remediation instructions
+5. Links to relevant documentation
+
+**Implementation Pattern**:
+```bash
+# Before: Basic operation that exits on failure
+gh repo clone "$REPO_URL" "$REPO_DIR"
+
+# After: Comprehensive error handling
+if ! gh repo clone "$REPO_URL" "$REPO_DIR" 2>&1; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✗ ERROR: Failed to clone repository"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Repository: $REPO_URL"
+    echo ""
+    echo "Possible causes:"
+    echo "  • Repository does not exist or URL is incorrect"
+    echo "  • You don't have access to this repository"
+    echo "  • Network connectivity issues"
+    echo "  • GitHub authentication issues"
+    echo ""
+    echo "To fix:"
+    echo "  1. Verify the repository URL is correct"
+    echo "  2. Ensure you have access to the repository"
+    echo "  3. Check your GitHub authentication"
+    echo "  4. Try re-running initialization"
+    echo ""
+    exit 1
+fi
+```
+
+**Key Insights**:
+- Use `set -e` at script start, then explicitly check command success for operations that need custom error messages
+- Capture stderr with `2>&1` to see actual error output before showing custom message
+- Visual separators (━ character) make errors stand out in logs
+- Success messages (`✓`) provide positive feedback and help users track progress
+- Include the actual values (repo URL, file path) in error messages for debugging
+- Provide examples of valid configurations for missing-config errors
+- Link to official documentation for complex topics (like Nix flakes)
+
+**Applications**:
+- Repository clone failures → show URL, check auth, verify access
+- Missing configuration files → show examples, link to docs
+- Environment setup failures → suggest validation commands, debugging steps
+
+This pattern significantly improves user experience by reducing the time from error to resolution. Users get actionable information immediately rather than having to search documentation or logs.
+
 ## Lessons for Future Agent Development
 
 1. **Start with structure, then functionality** - CLI scaffolding paid dividends
@@ -391,3 +450,4 @@ fi
 8. **Handle variable arguments carefully** - Commands that take arbitrary user input need special parsing and quoting logic
 9. **Understand Docker behavior deeply** - Different commands behave differently based on container state; use `docker inspect` for reliable state-independent queries
 10. **Design tests for real environments** - Tests should handle resource conflicts, partial cleanup, and idempotent execution
+11. **Provide comprehensive error messages** - Container entrypoints and critical operations should give users actionable, contextual error information with clear remediation steps
