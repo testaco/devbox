@@ -438,6 +438,118 @@ fi
 
 This pattern significantly improves user experience by reducing the time from error to resolution. Users get actionable information immediately rather than having to search documentation or logs.
 
+### Bash Completion Implementation
+
+**Learning**: Shell completion is a critical UX feature for CLI tools that significantly improves usability and discoverability.
+
+**Problem**: Users expect modern CLI tools to support tab completion for commands, flags, and context-specific arguments (like container names). Without completion, users must memorize all commands and flags or constantly reference help text.
+
+**Solution**: Implement comprehensive bash completion that provides:
+1. Command completion at the top level
+2. Flag completion based on current command context
+3. Dynamic completion of container names from `devbox list`
+4. Smart suggestions for common values (like tail line counts)
+5. Context-aware completion (e.g., suggesting common commands after `devbox exec <container>`)
+
+**Implementation Pattern**:
+```bash
+_devbox_completion() {
+    local cur prev words cword
+    _init_completion || return
+
+    # Define top-level commands
+    local commands="init create list attach stop start rm logs exec ports help"
+
+    # Extract the current command being completed
+    local command=""
+    for ((i=1; i < cword; i++)); do
+        if [[ "${words[i]}" != -* ]]; then
+            command="${words[i]}"
+            break
+        fi
+    done
+
+    # If no command yet, complete command names
+    if [[ -z "$command" ]]; then
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+        return 0
+    fi
+
+    # Command-specific completion
+    case "$command" in
+        attach|stop|start|rm|logs|ports|exec)
+            if [[ "$cur" == -* ]]; then
+                # Complete flags for this command
+                COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+            else
+                # Complete container names from devbox list
+                COMPREPLY=($(compgen -W "$(_devbox_containers)" -- "$cur"))
+            fi
+            ;;
+    esac
+}
+
+# Helper to get container names dynamically
+_devbox_containers() {
+    devbox list 2>/dev/null | tail -n +3 | awk '{print $1}'
+}
+
+complete -F _devbox_completion devbox
+```
+
+**Key Insights**:
+- Use `_init_completion` from bash-completion library for proper setup (with fallback for minimal environments)
+- Parse `words` array to determine current command context
+- Provide flag completion only when cursor is on a flag (`cur` starts with `-`)
+- Dynamic completion (container names) should call the actual CLI command and parse output
+- Suggest common values for option arguments (e.g., `10 50 100` for `--tail`)
+- For commands that take variable arguments (like `exec`), suggest common commands but allow arbitrary input
+- Context-aware completion improves UX (e.g., after `devbox exec container`, suggest `bash`, `sh`, `gh`, `claude`)
+
+**Testing Strategy**:
+```bash
+# Test completion by simulating COMP_WORDS and calling completion function
+COMP_WORDS=("devbox" "init" "")
+COMP_CWORD=2
+COMPREPLY=()
+_devbox_completion
+
+# Verify expected completions are present
+for flag in "--bedrock" "--import-aws"; do
+    # Check if flag is in COMPREPLY array
+done
+```
+
+**Test Coverage**:
+- Top-level command completion
+- Flag completion for each command
+- Container name completion for commands that need it
+- Value suggestions for options like `--tail`
+- Context-specific suggestions (exec command suggestions)
+- Edge cases like `rm -a` (should not suggest container names)
+
+**Key Insights for Testing**:
+- Test completion by setting `COMP_WORDS`, `COMP_CWORD`, and calling the completion function directly
+- Verify presence of expected completions in `COMPREPLY` array
+- Test both flag completion (`cur` starts with `-`) and argument completion
+- Use `|| true` pattern to prevent test failures from stopping the suite when not using `set -e`
+- Comprehensive completion tests ensure all commands, flags, and contexts are covered
+
+**Installation**:
+Users should be able to:
+1. Source the completion file directly: `source completions/devbox.bash`
+2. Install system-wide: Copy to `/etc/bash_completion.d/` or `~/.local/share/bash-completion/completions/`
+3. Add to shell profile: `echo "source /path/to/devbox.bash" >> ~/.bashrc`
+
+**Benefits**:
+- Significantly improves discoverability (users find commands and flags via tab)
+- Reduces typing (complete long flag names with tab)
+- Prevents errors (completion shows valid options)
+- Professional polish expected of production CLI tools
+- Dynamic container name completion makes operations faster
+
+This implementation demonstrates that shell completion should be considered early in CLI development, not as an afterthought. It's a high-value feature that dramatically improves daily usage.
+
 ## Lessons for Future Agent Development
 
 1. **Start with structure, then functionality** - CLI scaffolding paid dividends

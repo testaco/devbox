@@ -162,10 +162,12 @@
 - [ ] Confirm prompt for `rm` without `--force`
 
 ### Shell Completion
-- [ ] Create `completions/devbox.bash`
-- [ ] Complete commands
-- [ ] Complete container names for attach/stop/start/rm/logs/exec
-- [ ] Complete flags per command
+- [x] Create `completions/devbox.bash`
+- [x] Complete commands
+- [x] Complete container names for attach/stop/start/rm/logs/exec
+- [x] Complete flags per command
+- [x] Comprehensive test suite for all completion scenarios
+- [x] Added to pre-commit hook
 
 ---
 
