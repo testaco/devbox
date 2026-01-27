@@ -29,9 +29,10 @@ Devbox spins up lightweight Docker containers pre-configured with GitHub CLI and
 
 3. **Initialize devbox (one-time setup):**
    ```bash
-   ./bin/devbox init --bedrock --import-aws  # For AWS Bedrock mode
+   ./bin/devbox init --bedrock --import-aws                    # For AWS Bedrock mode (all SSO profiles)
+   ./bin/devbox init --bedrock --import-aws --aws-profile prod # For AWS Bedrock mode (specific profile)
    # OR
-   ./bin/devbox init                         # For Claude OAuth mode
+   ./bin/devbox init                                           # For Claude OAuth mode
    ```
 
 4. **Create your first development container:**
@@ -60,7 +61,7 @@ devbox-build     # Build the Docker base image
 
 ### Commands
 
-- `devbox init` - One-time setup: authenticate GitHub CLI and Claude Code
+- `devbox init [--bedrock] [--import-aws] [--aws-profile <name>]` - One-time setup: authenticate GitHub CLI and Claude Code
 - `devbox create <name> <repo>` - Create and start a new container instance
 - `devbox list` - List all devbox containers with status
 - `devbox attach <name|id>` - Attach to a running container's shell
@@ -78,7 +79,12 @@ devbox create myapp git@github.com:org/repo.git
 
 **AWS Bedrock Mode:**
 ```bash
+# Authenticate all SSO profiles
 devbox init --bedrock --import-aws
+devbox create myapp git@github.com:org/repo.git --bedrock --aws-profile prod
+
+# Authenticate specific SSO profile only
+devbox init --bedrock --import-aws --aws-profile prod
 devbox create myapp git@github.com:org/repo.git --bedrock --aws-profile prod
 ```
 

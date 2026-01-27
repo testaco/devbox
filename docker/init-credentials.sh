@@ -122,8 +122,8 @@ if [[ "${IMPORT_AWS:-false}" == "true" ]]; then
                 echo ""
 
                 # Find all profiles with SSO configuration
-                local current_profile=""
-                local sso_profiles=()
+                current_profile=""
+                sso_profiles=()
 
                 while IFS= read -r line; do
                     if [[ $line =~ ^\[profile\ (.+)\]$ ]]; then
@@ -140,20 +140,41 @@ if [[ "${IMPORT_AWS:-false}" == "true" ]]; then
                     echo "Found SSO profiles: ${sso_profiles[*]}"
                     echo ""
 
-                    # Authenticate each SSO profile
-                    for profile in "${sso_profiles[@]}"; do
-                        echo "Logging in to AWS SSO profile: $profile"
-                        echo "This will display a device code - please follow the instructions..."
-                        echo ""
+                    # Check if a specific profile was requested
+                    if [[ -n "${AWS_SSO_PROFILE:-}" ]]; then
+                        # Authenticate only the specified profile
+                        if [[ " ${sso_profiles[*]} " =~ " ${AWS_SSO_PROFILE} " ]]; then
+                            echo "Authenticating specified AWS SSO profile: $AWS_SSO_PROFILE"
+                            echo "This will display a device code - please follow the instructions..."
+                            echo ""
 
-                        if aws sso login --profile "$profile" --use-device-code; then
-                            echo "✓ SSO login successful for profile: $profile"
+                            if aws sso login --profile "$AWS_SSO_PROFILE" --use-device-code; then
+                                echo "✓ SSO login successful for profile: $AWS_SSO_PROFILE"
+                            else
+                                echo "✗ SSO login failed for profile: $AWS_SSO_PROFILE"
+                                echo "You can retry this later with: aws sso login --profile $AWS_SSO_PROFILE --use-device-code"
+                            fi
                         else
-                            echo "✗ SSO login failed for profile: $profile"
-                            echo "You can retry this later with: aws sso login --profile $profile --use-device-code"
+                            echo "✗ Specified profile '$AWS_SSO_PROFILE' not found in SSO profiles: ${sso_profiles[*]}"
+                            echo "Available profiles: ${sso_profiles[*]}"
                         fi
-                        echo ""
-                    done
+                    else
+                        # Authenticate all SSO profiles (original behavior)
+                        echo "Authenticating all SSO profiles..."
+                        for profile in "${sso_profiles[@]}"; do
+                            echo "Logging in to AWS SSO profile: $profile"
+                            echo "This will display a device code - please follow the instructions..."
+                            echo ""
+
+                            if aws sso login --profile "$profile" --use-device-code; then
+                                echo "✓ SSO login successful for profile: $profile"
+                            else
+                                echo "✗ SSO login failed for profile: $profile"
+                                echo "You can retry this later with: aws sso login --profile $profile --use-device-code"
+                            fi
+                            echo ""
+                        done
+                    fi
                 else
                     echo "Could not parse SSO profiles from config file"
                 fi
