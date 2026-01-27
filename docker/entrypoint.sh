@@ -9,21 +9,31 @@ if [ "$DEVBOX_DOCKER_IN_DOCKER" = "true" ]; then
     # Container is privileged - start Docker-in-Docker
     echo "🐳 Starting Docker-in-Docker..."
 
+    # Clean up any leftover Docker state from previous runs
+    sudo pkill -f dockerd || true
+    sudo pkill -f containerd || true
+    sudo rm -f /var/run/docker.sock || true
+    sudo rm -f /var/run/docker.pid || true
+    sudo rm -rf /var/lib/docker || true
+    sudo rm -rf /var/lib/containerd || true
+    sleep 3
+
     # Start Docker daemon in background with vfs storage driver (required for DinD)
     sudo dockerd --storage-driver=vfs --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 >/tmp/dockerd.log 2>&1 &
 
-    # Wait for Docker daemon to be ready
+    # Wait for Docker daemon to be ready (increased timeout for restarts)
     echo "⏳ Waiting for Docker daemon to start..."
-    for i in {1..30}; do
+    for i in {1..60}; do
         if sudo docker info >/dev/null 2>&1; then
             echo "✅ Docker daemon is ready"
             break
         fi
         sleep 1
-        if [ $i -eq 30 ]; then
-            echo "❌ Docker daemon failed to start within 30 seconds"
+        if [ $i -eq 60 ]; then
+            echo "❌ Docker daemon failed to start within 60 seconds"
             echo "Check logs with: docker logs <container> or view /tmp/dockerd.log"
-            exit 1
+            echo "⚠️  Continuing without Docker-in-Docker functionality"
+            break
         fi
     done
 
