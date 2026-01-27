@@ -110,7 +110,6 @@ main() {
 **Test Levels Implemented**:
 1. **Unit tests**: Basic script functionality, argument parsing, help text
 2. **Integration tests**: Docker daemon interaction, volume management
-3. **End-to-end tests**: Full workflow testing (planned)
 
 **Advanced Testing Patterns**:
 - **Dry-run modes**: Enable testing complex commands without side effects (`--dry-run` flag)

@@ -205,7 +205,6 @@
 - [x] `devbox init` completes Claude OAuth (non-bedrock) (CLI implemented)
 - [x] `devbox init --bedrock` skips Claude OAuth (CLI implemented)
 - [x] AWS credentials imported correctly (CLI implemented)
-- [ ] Credentials persist in volume across container restarts (requires end-to-end testing)
 
 ### Checkpoint 3: Workflow Works
 - [ ] `devbox create` clones repo and enters Nix shell
