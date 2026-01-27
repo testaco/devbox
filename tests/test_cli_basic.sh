@@ -71,14 +71,8 @@ else
     test_failed "Script does not have bash shebang"
 fi
 
-# Test 6: Unimplemented commands show appropriate error
-run_test "Unimplemented commands show not implemented error"
-OUTPUT=$("$DEVBOX_BIN" ports 2>&1 || true)
-if echo "$OUTPUT" | grep -q "not yet implemented"; then
-    test_passed "Unimplemented commands show appropriate error"
-else
-    test_failed "Unimplemented commands do not show expected error"
-fi
+# Test 6: Ports command is now implemented (removed unimplemented check)
+# All Phase 3 commands are now complete
 
 # Summary
 echo

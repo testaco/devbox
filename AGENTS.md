@@ -328,6 +328,57 @@ cmd_exec() {
 - Test with both container names and IDs
 - Test error cases: missing container, missing command, stopped container
 
+### Docker Inspection Patterns
+
+**Learning**: Different Docker commands provide different information depending on container state.
+
+**Challenge**: `docker port` returns empty output for stopped containers, but users need to see port mappings regardless of container state.
+
+**Solution**: Use `docker inspect` with `HostConfig.PortBindings` which persists port configuration even when containers are stopped.
+
+**Implementation**:
+```bash
+# Works for both running AND stopped containers
+ports=$(docker inspect --format '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{$p}} -> {{if .HostIp}}{{.HostIp}}{{else}}0.0.0.0{{end}}:{{.HostPort}}{{"\n"}}{{end}}{{end}}' "$container_id" 2>/dev/null)
+```
+
+**Key Insights**:
+- `docker port <container>` only works for running containers
+- `docker inspect .NetworkSettings.Ports` shows runtime port state (empty when stopped)
+- `docker inspect .HostConfig.PortBindings` shows configured ports regardless of state
+- Template formatting in `--format` requires careful escaping and iteration
+- Always default empty HostIp to "0.0.0.0" for clarity
+
+### Test Environment Considerations
+
+**Learning**: Tests must handle shared environments where resources (ports, container names) might conflict.
+
+**Problems Encountered**:
+1. Container names from previous test runs preventing new container creation
+2. Port conflicts when tests use commonly-used ports (8080, 3000, 5000)
+3. Tests silently failing when `docker run` fails but test continues
+
+**Solutions Applied**:
+```bash
+# 1. Always remove before creating
+docker rm -f "$container_name" >/dev/null 2>&1 || true
+
+# 2. Use high-numbered, unique ports
+container=$(create_test_container "oneport" "-p 18080:80")  # Not 8080
+
+# 3. Validate container creation
+if ! container=$(create_test_container "name"); then
+    log_fail "Container creation failed"
+    return 1
+fi
+```
+
+**Key Insights**:
+- Assume tests may run multiple times without full cleanup
+- Use ports above 15000 to avoid conflicts with common services
+- Make tests resilient to partial failures in previous runs
+- Cleanup at start AND end of test suites
+
 ## Lessons for Future Agent Development
 
 1. **Start with structure, then functionality** - CLI scaffolding paid dividends
@@ -338,3 +389,5 @@ cmd_exec() {
 6. **Follow TDD rigorously** - Write tests first, implement to pass, refactor if needed
 7. **Reuse patterns** - Consistent command structure makes codebase predictable and maintainable
 8. **Handle variable arguments carefully** - Commands that take arbitrary user input need special parsing and quoting logic
+9. **Understand Docker behavior deeply** - Different commands behave differently based on container state; use `docker inspect` for reliable state-independent queries
+10. **Design tests for real environments** - Tests should handle resource conflicts, partial cleanup, and idempotent execution

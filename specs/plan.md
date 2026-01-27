@@ -140,7 +140,13 @@
   - [x] Only works with running containers (enforced)
   - [x] Complete test suite with 11 comprehensive tests
   - [x] Added to pre-commit hook
-- [ ] `devbox ports <name-or-id>`
+- [x] `devbox ports <name-or-id>`
+  - [x] Comprehensive help text with examples
+  - [x] Full flag parsing (--help, --dry-run)
+  - [x] Works with both running and stopped containers
+  - [x] Uses HostConfig.PortBindings for accurate port display
+  - [x] Complete test suite with 11 comprehensive tests
+  - [x] Added to pre-commit hook
 
 ### Error Handling
 - [ ] Check Docker daemon is running
