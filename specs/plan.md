@@ -132,7 +132,14 @@
   - [x] Full flag parsing (--help, --dry-run, -f/--follow, --tail)
   - [x] Works with both running and stopped containers
   - [x] Complete test suite with 11 comprehensive tests
-- [ ] `devbox exec <name-or-id> <command...>`
+- [x] `devbox exec <name-or-id> <command...>`
+  - [x] Comprehensive help text with examples
+  - [x] Full flag parsing (--help, --dry-run, -it for interactive)
+  - [x] Variable-length command argument handling
+  - [x] Proper quoting for arguments with spaces
+  - [x] Only works with running containers (enforced)
+  - [x] Complete test suite with 11 comprehensive tests
+  - [x] Added to pre-commit hook
 - [ ] `devbox ports <name-or-id>`
 
 ### Error Handling

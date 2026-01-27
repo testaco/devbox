@@ -249,6 +249,85 @@ test_feature() {
 - Use dry-run mode to test complex operations safely
 - Separate test files per command keep test suites manageable
 
+### Handling Variable-Length Command Arguments
+
+**Learning**: Commands that execute arbitrary user commands (like `exec`) require special handling for argument parsing and quoting.
+
+**Challenge**: `devbox exec <container> <command> [args...]` needs to:
+1. Parse the container name
+2. Handle optional flags like `-it` for interactive mode
+3. Capture all remaining arguments as the command to execute
+4. Properly quote arguments when building the docker command
+
+**Implementation Pattern** (applied to `devbox exec`):
+```bash
+cmd_exec() {
+    local container_name=""
+    local exec_command=()
+    local interactive_flags=""
+
+    # Parse arguments and flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -it|-ti)
+                interactive_flags="-it"
+                shift
+                ;;
+            --help|-h)
+                # Show help and return
+                return 0
+                ;;
+            *)
+                if [[ -z "$container_name" ]]; then
+                    container_name="$1"
+                    shift
+                else
+                    # Everything else is the command
+                    exec_command+=("$@")
+                    break  # Break to preserve all remaining args
+                fi
+                ;;
+        esac
+    done
+
+    # Build docker exec command with proper quoting
+    local docker_cmd="docker exec"
+
+    if [[ -n "$interactive_flags" ]]; then
+        docker_cmd="$docker_cmd $interactive_flags"
+    fi
+
+    docker_cmd="$docker_cmd $container_id"
+
+    # Quote arguments that contain spaces
+    for arg in "${exec_command[@]}"; do
+        if [[ "$arg" =~ [[:space:]] ]]; then
+            docker_cmd="$docker_cmd \"$arg\""
+        else
+            docker_cmd="$docker_cmd $arg"
+        fi
+    done
+
+    # Use eval to execute with proper quoting
+    eval "$docker_cmd"
+}
+```
+
+**Key Insights**:
+- Use `"$@"` to capture all remaining arguments at once
+- Use `break` after capturing variable args to preserve them all
+- Store command arguments in an array for flexibility
+- Properly quote arguments containing spaces when building shell commands
+- Use `eval` carefully when executing constructed commands
+- Test with commands that have multiple args and special characters
+
+**Testing Considerations**:
+- Test simple commands: `echo "hello"`
+- Test commands with multiple args: `sh -c "echo arg1 && echo arg2"`
+- Test interactive mode flag passthrough
+- Test with both container names and IDs
+- Test error cases: missing container, missing command, stopped container
+
 ## Lessons for Future Agent Development
 
 1. **Start with structure, then functionality** - CLI scaffolding paid dividends
@@ -258,3 +337,4 @@ test_feature() {
 5. **Incremental validation** - Each phase should have working, testable output
 6. **Follow TDD rigorously** - Write tests first, implement to pass, refactor if needed
 7. **Reuse patterns** - Consistent command structure makes codebase predictable and maintainable
+8. **Handle variable arguments carefully** - Commands that take arbitrary user input need special parsing and quoting logic
