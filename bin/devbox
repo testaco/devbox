@@ -503,9 +503,11 @@ EOF
         labels="$labels --label devbox.ports=$port_labels"
     fi
 
-    # Detect Docker socket location (rootless vs root)
+    # Detect Docker socket location (rootless vs root vs Colima)
     local docker_socket=""
     local docker_host_var=""
+    local is_colima=false
+
     if [ -S "/run/user/$(id -u)/docker.sock" ]; then
         # Rootless Docker
         docker_socket="/run/user/$(id -u)/docker.sock"
@@ -514,6 +516,10 @@ EOF
         # Root Docker
         docker_socket="/var/run/docker.sock"
         docker_host_var="unix:///var/run/docker.sock"
+    elif [ -S "$HOME/.colima/default/docker.sock" ]; then
+        # Colima Docker (macOS) - special handling needed
+        is_colima=true
+        docker_host_var="unix:///home/devbox/.colima/default/docker.sock"
     fi
 
     # Build Docker run command
@@ -526,6 +532,12 @@ EOF
     if [ -n "$docker_socket" ]; then
         docker_cmd="$docker_cmd -v ${docker_socket}:/var/run/docker.sock"
         docker_cmd="$docker_cmd -e DOCKER_HOST=${docker_host_var}"
+    elif [ "$is_colima" = true ]; then
+        # For Colima (macOS), use Docker-in-Docker since socket mounting doesn't work
+        docker_cmd="$docker_cmd --privileged"
+        docker_cmd="$docker_cmd -e DOCKER_TLS_CERTDIR="
+        docker_cmd="$docker_cmd -e DEVBOX_DOCKER_IN_DOCKER=true"
+        log_info "Using Docker-in-Docker for macOS/Colima compatibility"
     fi
 
     docker_cmd="$docker_cmd $port_args"

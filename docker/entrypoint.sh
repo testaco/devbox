@@ -4,10 +4,36 @@ set -e
 REPO_URL="${DEVBOX_REPO_URL}"
 REPO_DIR="/workspace"
 
-# Fix Docker socket permissions if it exists (for rootless Docker access)
-if [ -S "/var/run/docker.sock" ]; then
-    echo "Fixing Docker socket permissions..."
+# Set up Docker access (either Docker-in-Docker or host socket mounting)
+if [ "$DEVBOX_DOCKER_IN_DOCKER" = "true" ]; then
+    # Container is privileged - start Docker-in-Docker
+    echo "🐳 Starting Docker-in-Docker..."
+
+    # Start Docker daemon in background with vfs storage driver (required for DinD)
+    sudo dockerd --storage-driver=vfs --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 >/tmp/dockerd.log 2>&1 &
+
+    # Wait for Docker daemon to be ready
+    echo "⏳ Waiting for Docker daemon to start..."
+    for i in {1..30}; do
+        if sudo docker info >/dev/null 2>&1; then
+            echo "✅ Docker daemon is ready"
+            break
+        fi
+        sleep 1
+        if [ $i -eq 30 ]; then
+            echo "❌ Docker daemon failed to start within 30 seconds"
+            echo "Check logs with: docker logs <container> or view /tmp/dockerd.log"
+            exit 1
+        fi
+    done
+
+elif [ -S "/var/run/docker.sock" ]; then
+    # Host socket is mounted - fix permissions for rootless Docker access
+    echo "🔧 Fixing Docker socket permissions for host access..."
     sudo chmod 666 /var/run/docker.sock
+    echo "✅ Docker socket permissions updated"
+else
+    echo "ℹ️  No Docker access configured (neither privileged mode nor socket mount)"
 fi
 
 # Set up Claude configuration directory

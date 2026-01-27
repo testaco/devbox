@@ -32,18 +32,20 @@ ENV PATH="/home/devbox/.nix-profile/bin:$PATH"
 # Switch back to root for remaining setup
 USER root
 
-# Install Docker CLI (for Docker-on-host access)
+# Install Docker CLI and Engine (for Docker-on-host access and Docker-in-Docker)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         apt-transport-https \
         gnupg \
         lsb-release \
+        iptables \
     && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
     | tee /etc/apt/sources.list.d/docker.list > /dev/null \
     && apt-get update \
-    && apt-get install -y docker-ce-cli \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y docker-ce-cli docker-ce \
+    && rm -rf /var/lib/apt/lists/* \
+    && usermod -aG docker devbox
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
