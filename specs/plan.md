@@ -149,11 +149,12 @@
   - [x] Added to pre-commit hook
 
 ### Error Handling
-- [ ] Check Docker daemon is running
-- [ ] Check credentials volume exists before create
-- [ ] Friendly error if container name not found
-- [ ] Friendly error if repo clone fails
-- [ ] Friendly error if no Nix config in repo
+- [x] Check Docker daemon is running (implemented in `check_docker()`)
+- [x] Check credentials volume exists before create (implemented in `cmd_create()`)
+- [x] Friendly error if container name not found (implemented in `resolve_container()`)
+- [x] Friendly error if repo clone fails (comprehensive error messages in `entrypoint.sh`)
+- [x] Friendly error if no Nix config in repo (detailed instructions and examples in `entrypoint.sh`)
+- [x] Friendly error if Nix shell entry fails (debugging tips in `entrypoint.sh`)
 
 ### UX Improvements
 - [ ] Colored output (green success, red error, yellow warning)

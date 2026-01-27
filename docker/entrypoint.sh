@@ -27,8 +27,31 @@ fi
 
 # Clone repository if not already present
 if [ ! -d "$REPO_DIR/.git" ]; then
+    echo "Cloning repository: $REPO_URL"
     # Use gh repo clone to leverage GitHub CLI authentication
-    gh repo clone "$REPO_URL" "$REPO_DIR"
+    if ! gh repo clone "$REPO_URL" "$REPO_DIR" 2>&1; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✗ ERROR: Failed to clone repository"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Repository: $REPO_URL"
+        echo ""
+        echo "Possible causes:"
+        echo "  • Repository does not exist or URL is incorrect"
+        echo "  • You don't have access to this repository"
+        echo "  • Network connectivity issues"
+        echo "  • GitHub authentication issues"
+        echo ""
+        echo "To fix:"
+        echo "  1. Verify the repository URL is correct"
+        echo "  2. Ensure you have access to the repository"
+        echo "  3. Check your GitHub authentication with: devbox exec <container> gh auth status"
+        echo "  4. Try re-running: devbox init"
+        echo ""
+        exit 1
+    fi
+    echo "✓ Repository cloned successfully"
 fi
 
 cd "$REPO_DIR"
@@ -47,14 +70,71 @@ export NIX_CONFIG="experimental-features = nix-command flakes"
 
 # Verify Nix configuration exists
 if [ ! -f "flake.nix" ] && [ ! -f "shell.nix" ]; then
-    echo "ERROR: No flake.nix or shell.nix found in repository."
-    echo "Devbox requires a Nix configuration for development dependencies."
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✗ ERROR: No Nix configuration found"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Repository: $REPO_URL"
+    echo "Expected: flake.nix or shell.nix"
+    echo ""
+    echo "Devbox requires a Nix configuration to set up the development"
+    echo "environment with the correct dependencies."
+    echo ""
+    echo "To fix this, add either:"
+    echo ""
+    echo "  1. flake.nix (recommended) - Modern Nix flakes configuration"
+    echo "  2. shell.nix (legacy) - Traditional Nix shell configuration"
+    echo ""
+    echo "Example flake.nix:"
+    echo "  {"
+    echo "    description = \"Dev environment\";"
+    echo "    inputs.nixpkgs.url = \"github:NixOS/nixpkgs/nixos-unstable\";"
+    echo "    outputs = { self, nixpkgs }: {"
+    echo "      devShells.default = nixpkgs.legacyPackages.x86_64-linux.mkShell {"
+    echo "        buildInputs = [ nixpkgs.legacyPackages.x86_64-linux.nodejs ];"
+    echo "      };"
+    echo "    };"
+    echo "  }"
+    echo ""
+    echo "For more information:"
+    echo "  https://nixos.org/manual/nix/stable/command-ref/new-cli/nix3-flake.html"
+    echo ""
     exit 1
 fi
 
 # Enter Nix shell
+echo "Entering Nix development environment..."
 if [ -f "flake.nix" ]; then
-    exec nix develop --command bash
+    if ! nix develop --command bash; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✗ ERROR: Failed to enter Nix development environment"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "The flake.nix file may have syntax errors or invalid configuration."
+        echo ""
+        echo "To debug:"
+        echo "  1. Verify your flake.nix is valid: nix flake check"
+        echo "  2. Check for syntax errors in the file"
+        echo "  3. Ensure all inputs are accessible"
+        echo ""
+        exit 1
+    fi
 else
-    exec nix-shell --command bash
+    if ! nix-shell --command bash; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✗ ERROR: Failed to enter Nix shell environment"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "The shell.nix file may have syntax errors or invalid configuration."
+        echo ""
+        echo "To debug:"
+        echo "  1. Verify your shell.nix is valid"
+        echo "  2. Check for syntax errors in the file"
+        echo "  3. Ensure all dependencies are accessible"
+        echo ""
+        exit 1
+    fi
 fi
