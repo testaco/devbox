@@ -155,6 +155,100 @@ main() {
 - Requires Docker daemon and build context access
 - More complex error handling for build failures
 
+### Command Implementation Patterns
+
+**Learning**: Follow consistent patterns when implementing new CLI commands for maintainability.
+
+**Pattern Applied (devbox logs)**:
+1. **Flag parsing loop**: Iterate through all arguments with proper case matching
+2. **Help text first**: Check for `--help/-h` before any validation
+3. **Argument validation**: Validate required arguments after parsing all flags
+4. **Container resolution**: Use shared `resolve_container()` helper for name/ID lookup
+5. **Dry-run support**: Add `--dry-run` flag for testing without side effects
+6. **Display name formatting**: Strip prefixes for cleaner user-facing output
+
+**Implementation Structure**:
+```bash
+cmd_logs() {
+    local container_name=""
+    local follow=false
+    local tail_lines=""
+    local dry_run=false
+
+    # Parse arguments and flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --follow|-f) follow=true; shift ;;
+            --tail) tail_lines="$2"; shift 2 ;;
+            --help|-h) show_help; return 0 ;;
+            --*) log_error "Unknown option: $1"; return 1 ;;
+            *) container_name="$1"; shift ;;
+        esac
+    done
+
+    # Validate required arguments
+    [[ -z "$container_name" ]] && log_error "..." && return 1
+
+    # Resolve container
+    container_id=$(resolve_container "$container_name") || return 1
+
+    # Build and execute command
+    docker_cmd="docker logs $options $container_id"
+    eval "$docker_cmd"
+}
+```
+
+**Key Insights**:
+- Short flags (`-f`) and long flags (`--follow`) should be handled together
+- Options requiring arguments need validation before shifting
+- Dry-run mode enables comprehensive testing without actual execution
+- Info messages should be contextual (e.g., suppressed when following logs)
+- All commands benefit from consistent structure
+
+### Test Coverage Strategies
+
+**Learning**: Comprehensive tests should cover all command aspects, not just happy paths.
+
+**Test Categories for CLI Commands** (applied to `devbox logs`):
+1. **Help and documentation**: Help flag, usage messages
+2. **Argument validation**: Missing arguments, too many arguments, invalid container names
+3. **Flag parsing**: Each flag individually, combinations of flags, invalid flags
+4. **Container states**: Running containers, stopped containers, nonexistent containers
+5. **Alternative inputs**: Container names, short IDs, full IDs
+6. **Edge cases**: Dry-run mode, multiple flags together
+
+**Test Implementation Pattern**:
+```bash
+test_feature() {
+    log_test "Testing feature description"
+    ((TESTS_RUN++))
+
+    # Setup test environment
+    container=$(create_test_container "testname")
+
+    # Execute test
+    if output=$("$DEVBOX_BIN" command args 2>&1); then
+        # Validate success output
+        if [[ "$output" == *"expected"* ]]; then
+            log_pass "Test passed"
+        else
+            log_fail "Unexpected output: $output"
+            return 1
+        fi
+    else
+        log_fail "Command failed: $output"
+        return 1
+    fi
+}
+```
+
+**Key Insights**:
+- Create dedicated test containers with predictable behavior
+- Test both success and failure paths
+- Verify error messages contain helpful information
+- Use dry-run mode to test complex operations safely
+- Separate test files per command keep test suites manageable
+
 ## Lessons for Future Agent Development
 
 1. **Start with structure, then functionality** - CLI scaffolding paid dividends
@@ -162,3 +256,5 @@ main() {
 3. **Plan for user experience** - Color coding and clear error messages matter
 4. **Document decisions** - Architecture choices need rationale for future reference
 5. **Incremental validation** - Each phase should have working, testable output
+6. **Follow TDD rigorously** - Write tests first, implement to pass, refactor if needed
+7. **Reuse patterns** - Consistent command structure makes codebase predictable and maintainable

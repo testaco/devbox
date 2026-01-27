@@ -127,7 +127,11 @@
 ## Phase 3: Polish
 
 ### Additional Commands
-- [ ] `devbox logs <name-or-id>` with `-f` follow flag
+- [x] `devbox logs <name-or-id>` with `-f` follow flag
+  - [x] Comprehensive help text with examples
+  - [x] Full flag parsing (--help, --dry-run, -f/--follow, --tail)
+  - [x] Works with both running and stopped containers
+  - [x] Complete test suite with 11 comprehensive tests
 - [ ] `devbox exec <name-or-id> <command...>`
 - [ ] `devbox ports <name-or-id>`
 
