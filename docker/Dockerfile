@@ -9,8 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user first (Nix needs to be installed as the target user for single-user mode)
-RUN useradd -m -s /bin/bash devbox && \
+# Create non-root user with UID 1000 (matches typical rootless Docker host user)
+# This ensures proper permissions when mounting rootless Docker socket
+RUN groupadd -g 1000 devbox 2>/dev/null || true && \
+    useradd -u 1000 -g 1000 -m -s /bin/bash devbox && \
     echo "devbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Nix using official installer for proper single-user setup
@@ -29,6 +31,19 @@ ENV PATH="/home/devbox/.nix-profile/bin:$PATH"
 
 # Switch back to root for remaining setup
 USER root
+
+# Install Docker CLI (for Docker-on-host access)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        apt-transport-https \
+        gnupg \
+        lsb-release \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
+    | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \

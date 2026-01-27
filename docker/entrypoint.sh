@@ -4,6 +4,12 @@ set -e
 REPO_URL="${DEVBOX_REPO_URL}"
 REPO_DIR="/workspace"
 
+# Fix Docker socket permissions if it exists (for rootless Docker access)
+if [ -S "/var/run/docker.sock" ]; then
+    echo "Fixing Docker socket permissions..."
+    sudo chmod 666 /var/run/docker.sock
+fi
+
 # Set up Claude configuration directory
 echo "Setting up Claude configuration..."
 mkdir -p ~/.claude
