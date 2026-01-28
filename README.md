@@ -6,14 +6,79 @@ A CLI tool for managing isolated, authenticated development containers.
 
 Devbox spins up lightweight Docker containers pre-configured with GitHub CLI and Claude Code, cloned to a specified repository, with Nix-based development environments. Users authenticate once; credentials persist across container lifecycles.
 
-## Quick Start
+## Installation
 
 ### Prerequisites
+
+- Docker (Docker Desktop, Colima on macOS, or native Docker on Linux)
+- Bash shell
+
+### Quick Install
+
+```bash
+# Clone the repository
+git clone git@github.com:your-org/devbox.git
+cd devbox
+
+# Install system-wide (requires sudo)
+sudo ./install.sh
+
+# Or install to user directory (no sudo needed)
+./install.sh --prefix ~/.local
+```
+
+### Installation Options
+
+```bash
+# See all options
+./install.sh --help
+
+# Install without building Docker image (build later)
+./install.sh --prefix ~/.local --skip-image
+
+# Dry run - see what would be installed
+./install.sh --dry-run
+
+# Uninstall
+./install.sh --prefix ~/.local --uninstall
+```
+
+### Post-Installation
+
+1. **Add to PATH** (if using `--prefix ~/.local`):
+   ```bash
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+   source ~/.bashrc
+   ```
+
+2. **Enable bash completion** (optional):
+   ```bash
+   # For user installation
+   source ~/.local/share/bash-completion/completions/devbox
+
+   # To enable permanently, add to ~/.bashrc:
+   echo 'source ~/.local/share/bash-completion/completions/devbox' >> ~/.bashrc
+   ```
+
+3. **Initialize devbox**:
+   ```bash
+   devbox init                           # For Claude OAuth mode
+   # OR
+   devbox init --bedrock --import-aws    # For AWS Bedrock mode
+   ```
+
+## Quick Start
+
+### For Development (Contributors)
+
+If you want to contribute to devbox itself:
+
+#### Prerequisites
 
 - [Nix](https://nixos.org/download.html) with flakes enabled
 - Docker (Docker Desktop or alternatives like Colima on macOS)
 
-### Development Setup
+#### Development Setup
 
 1. **Enter the development environment:**
    ```bash
@@ -140,11 +205,42 @@ This project supports "developing devbox inside of devbox" - using devbox itself
    - Docker-in-Docker for testing container operations
    - Full development workflow including testing and building
 
+### Setting Up Pre-commit Hooks
+
+After cloning the repository, set up the pre-commit hook to run tests before each commit:
+
+```bash
+# Copy the hook template
+cat > .git/hooks/pre-commit << 'EOF'
+#!/bin/bash
+# Pre-commit hook for devbox - runs all tests before allowing commits
+
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+echo "Running pre-commit tests..."
+
+# Run all test suites
+for test_file in tests/test_*.sh; do
+    if [[ -x "$test_file" ]]; then
+        echo "=== Running $test_file ==="
+        bash "$test_file" || exit 1
+    fi
+done
+
+echo "All tests passed!"
+EOF
+
+# Make it executable
+chmod +x .git/hooks/pre-commit
+```
+
 ### Contributing
 
 1. **Code Quality**: All bash scripts should pass `shellcheck` and be formatted with `shfmt`
 2. **Testing**: Add tests for new commands in `tests/test_<command>.sh`
-3. **Documentation**: Update help text and examples for new features
+3. **Pre-commit Hooks**: Set up pre-commit hooks (see above) to catch issues early
+4. **Documentation**: Update help text and examples for new features
 
 ## Architecture
 

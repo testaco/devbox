@@ -549,6 +549,129 @@ Users should be able to:
 
 This implementation demonstrates that shell completion should be considered early in CLI development, not as an afterthought. It's a high-value feature that dramatically improves daily usage.
 
+### Installation Script Design
+
+**Learning**: A well-designed installation script significantly improves user adoption by making setup effortless.
+
+**Problem**: CLI tools often require multiple manual steps to install: copying binaries, setting permissions, installing completion files, and building Docker images. Users may forget steps or do them incorrectly.
+
+**Solution**: Create a comprehensive installation script that handles all setup with sensible defaults and useful options.
+
+**Key Features Implemented**:
+```bash
+# Basic installation (system-wide)
+sudo ./install.sh
+
+# User installation (no sudo required)
+./install.sh --prefix ~/.local
+
+# Preview what would be installed
+./install.sh --dry-run
+
+# Uninstall when needed
+./install.sh --prefix ~/.local --uninstall
+
+# Skip optional components
+./install.sh --skip-image --skip-completion
+```
+
+**Implementation Pattern**:
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Default configuration
+DEFAULT_PREFIX="/usr/local"
+PREFIX="${PREFIX:-$DEFAULT_PREFIX}"
+DRY_RUN=false
+UNINSTALL=false
+SKIP_IMAGE=false
+SKIP_COMPLETION=false
+
+# Logging functions for consistent output
+log_info() { echo -e "${BLUE}INFO:${NC} $*"; }
+log_success() { echo -e "${GREEN}✓${NC} $*"; }
+log_error() { echo -e "${RED}✗${NC} $*" >&2; }
+
+# Execute or show command based on dry-run mode
+run_cmd() {
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "  Would run: $*"
+    else
+        eval "$*"
+    fi
+}
+
+# Installation functions
+install_binary() {
+    mkdir -p "$PREFIX/bin"
+    cp "$SCRIPT_DIR/bin/devbox" "$PREFIX/bin/devbox"
+    chmod +x "$PREFIX/bin/devbox"
+}
+
+install_completion() {
+    mkdir -p "$PREFIX/share/bash-completion/completions"
+    cp "$SCRIPT_DIR/completions/devbox.bash" "$PREFIX/share/bash-completion/completions/devbox"
+}
+```
+
+**Key Insights**:
+1. **Prefix flexibility**: Support custom installation directories via `--prefix` for user-level installs without sudo
+2. **Dry-run mode**: Essential for testing and previewing changes before executing
+3. **Uninstall capability**: Users need a clean way to remove the software
+4. **Skip options**: Allow skipping optional components (Docker image, completions) for faster installs or constrained environments
+5. **Environment variable fallback**: Support `PREFIX` env var in addition to `--prefix` flag
+6. **PATH warnings**: Detect when install directory is not in PATH and provide instructions
+7. **Post-install guidance**: Show users how to enable completion and finish setup
+
+**Testing Strategy for Installation Scripts**:
+```bash
+test_install_to_temp_dir() {
+    local test_prefix="/tmp/devbox-install-test-$$"
+
+    # Install to temporary directory
+    ./install.sh --prefix "$test_prefix" --skip-image
+
+    # Verify binary exists and works
+    [[ -x "$test_prefix/bin/devbox" ]]
+    "$test_prefix/bin/devbox" --help >/dev/null
+
+    # Verify completion was installed
+    [[ -f "$test_prefix/share/bash-completion/completions/devbox" ]]
+
+    # Clean up
+    rm -rf "$test_prefix"
+}
+
+test_uninstall() {
+    # Install first
+    ./install.sh --prefix "$test_prefix" --skip-image
+
+    # Then uninstall
+    ./install.sh --prefix "$test_prefix" --uninstall
+
+    # Verify files are gone
+    [[ ! -f "$test_prefix/bin/devbox" ]]
+}
+```
+
+**Key Insights for Testing**:
+- Use unique temporary directories with `$$` (PID) to avoid conflicts
+- Test both install and uninstall flows
+- Verify the installed binary actually works (not just exists)
+- Use `--skip-image` in tests to avoid slow Docker builds
+- Clean up test directories even on failure
+
+**Benefits of This Approach**:
+- Single command to install everything
+- Works for both system-wide and user installations
+- Idempotent (can run multiple times safely)
+- Self-documenting via `--help`
+- Easy to test with `--dry-run`
+- Clean removal with `--uninstall`
+
+This pattern makes the difference between "download and run a dozen commands" and "download and run one command" - a major UX improvement.
+
 ## Lessons for Future Agent Development
 
 1. **Start with structure, then functionality** - CLI scaffolding paid dividends
@@ -562,3 +685,4 @@ This implementation demonstrates that shell completion should be considered earl
 9. **Understand Docker behavior deeply** - Different commands behave differently based on container state; use `docker inspect` for reliable state-independent queries
 10. **Design tests for real environments** - Tests should handle resource conflicts, partial cleanup, and idempotent execution
 11. **Provide comprehensive error messages** - Container entrypoints and critical operations should give users actionable, contextual error information with clear remediation steps
+12. **Make installation effortless** - A single installation script with sensible defaults, `--dry-run`, `--uninstall`, and `--prefix` options reduces adoption friction significantly

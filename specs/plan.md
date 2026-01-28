@@ -61,7 +61,7 @@
   - [x] Make hook executable (`chmod +x .git/hooks/pre-commit`)
   - [x] Test hook by making a test commit
   - [x] Fix test counting logic to properly handle skipped tests
-  - [ ] Add instructions in README for hook setup on new clones
+  - [x] Add instructions in README for hook setup on new clones
 
 ### `devbox init`
 - [x] Check if credentials volume exists, create if not
@@ -174,15 +174,21 @@
 ## Phase 4: Distribution
 
 ### Installation
-- [ ] Create `install.sh` script
-- [ ] Copy `bin/devbox` to `/usr/local/bin` or `~/.local/bin`
-- [ ] Install bash completion
-- [ ] Build and tag Docker image
+- [x] Create `install.sh` script
+  - [x] Supports `--prefix` for custom installation directory
+  - [x] Supports `--dry-run` to preview actions
+  - [x] Supports `--uninstall` to remove devbox
+  - [x] Supports `--skip-image` to skip Docker build
+  - [x] Supports `--skip-completion` to skip bash completion
+  - [x] Comprehensive test suite (13 tests)
+- [x] Copy `bin/devbox` to `/usr/local/bin` or `~/.local/bin`
+- [x] Install bash completion to `<prefix>/share/bash-completion/completions/`
+- [x] Build and tag Docker image (optional, via `--skip-image`)
 - [ ] Push image to registry (optional: GitHub Container Registry)
 
 ### Documentation
-- [ ] Write README.md with quick start
-- [ ] Document all commands and flags
+- [x] Write README.md with installation instructions
+- [x] Document all commands and flags (in help text and README)
 - [ ] Add troubleshooting section
 - [ ] Add example `flake.nix` for common stacks (Node, Python, Go)
 
