@@ -33,11 +33,14 @@ log_skip() { echo -e "${BLUE}⊘ SKIP:${NC} $*"; ((TESTS_SKIPPED++)); }
 # Cleanup function
 cleanup() {
     echo "Cleaning up test containers..."
-    if [[ ${#TEST_CONTAINERS[@]} -gt 0 ]]; then
+    # Temporarily disable unbound variable check for array length check
+    set +u
+    if [ "${#TEST_CONTAINERS[@]}" -gt 0 ]; then
         for container in "${TEST_CONTAINERS[@]}"; do
             docker rm -f "$container" 2>/dev/null || true
         done
     fi
+    set -u
 }
 
 # Set up cleanup trap
@@ -48,6 +51,9 @@ create_test_container() {
     local name="$1"
     local state="${2:-running}"
     local container_name="devbox-test-${name}"
+
+    # Remove existing container if it exists
+    docker rm -f "$container_name" >/dev/null 2>&1 || true
 
     # Create container
     if [ "$state" = "running" ]; then

@@ -44,6 +44,9 @@ create_test_container() {
     local container_name="$1"
     local full_name="devbox-test-$container_name"
 
+    # Remove existing container if it exists
+    docker rm -f "$full_name" >/dev/null 2>&1 || true
+
     # Create and start container, then stop it
     if docker run -dit \
         --name "$full_name" \

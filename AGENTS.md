@@ -549,6 +549,71 @@ Users should be able to:
 
 This implementation demonstrates that shell completion should be considered early in CLI development, not as an afterthought. It's a high-value feature that dramatically improves daily usage.
 
+### Bash Completion Portability
+
+**Learning**: Bash completion scripts must work in environments without the bash-completion package installed.
+
+**Problem**: Many completion scripts depend on `_init_completion` from the bash-completion package. When this package isn't installed or sourced, completions silently fail with cryptic errors like "_init_completion: command not found".
+
+**Root Cause**: The `_init_completion` function is provided by the bash-completion package (`/usr/share/bash-completion/bash_completion`) which:
+- May not be installed on all systems
+- Might not be sourced in all shell configurations
+- Is often missing in minimal environments (containers, CI/CD)
+
+**Solution**: Provide a fallback implementation for environments without bash-completion:
+
+```bash
+# Fallback _init_completion for systems without bash-completion package
+if ! declare -F _init_completion >/dev/null 2>&1; then
+    _init_completion() {
+        # Basic implementation when bash-completion is not available
+        COMPREPLY=()
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+        words=("${COMP_WORDS[@]}")
+        cword=$COMP_CWORD
+    }
+fi
+
+_devbox_completion() {
+    local cur prev words cword
+    _init_completion || return
+
+    # ... rest of completion logic
+}
+```
+
+**Key Insights**:
+1. **Check for existence**: Use `declare -F _init_completion` to detect if the function exists
+2. **Minimal fallback**: The fallback only needs to set up the basic variables (`cur`, `prev`, `words`, `cword`)
+3. **Let advanced features fail gracefully**: bash-completion provides advanced features (like handling special chars), but basic completion works fine without them
+4. **Test without bash-completion**: Always test in a clean environment (`bash --norc --noprofile`)
+
+**Testing Strategy**:
+```bash
+# Test in environment without bash-completion
+bash --norc --noprofile -c "
+    source completions/devbox.bash
+
+    # Simulate tab completion
+    COMP_WORDS=(devbox '')
+    COMP_CWORD=1
+    _devbox_completion
+
+    # Verify completions work
+    echo \${COMPREPLY[*]}
+"
+```
+
+**Benefits**:
+- Completion works everywhere (servers, minimal containers, fresh installs)
+- No confusing silent failures when bash-completion isn't available
+- Users don't need to install extra packages
+- Still uses bash-completion features when available (better handling of edge cases)
+
+**Common Mistake to Avoid**:
+Don't just blindly require bash-completion. Many "completion not working" issues stem from this assumption. A simple fallback makes your completion portable and reliable.
+
 ### Installation Script Design
 
 **Learning**: A well-designed installation script significantly improves user adoption by making setup effortless.
@@ -686,3 +751,4 @@ This pattern makes the difference between "download and run a dozen commands" an
 10. **Design tests for real environments** - Tests should handle resource conflicts, partial cleanup, and idempotent execution
 11. **Provide comprehensive error messages** - Container entrypoints and critical operations should give users actionable, contextual error information with clear remediation steps
 12. **Make installation effortless** - A single installation script with sensible defaults, `--dry-run`, `--uninstall`, and `--prefix` options reduces adoption friction significantly
+13. **Make bash completion portable** - Always provide fallback for `_init_completion` to work without bash-completion package; test in minimal environments (`bash --norc --noprofile`)

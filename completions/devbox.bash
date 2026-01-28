@@ -2,6 +2,18 @@
 # Bash completion for devbox CLI
 # Install: source this file or copy to /etc/bash_completion.d/
 
+# Fallback _init_completion for systems without bash-completion package
+if ! declare -F _init_completion >/dev/null 2>&1; then
+    _init_completion() {
+        # Basic implementation when bash-completion is not available
+        COMPREPLY=()
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+        words=("${COMP_WORDS[@]}")
+        cword=$COMP_CWORD
+    }
+fi
+
 _devbox_completion() {
     local cur prev words cword
     _init_completion || return

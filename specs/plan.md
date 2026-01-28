@@ -168,6 +168,7 @@
 - [x] Complete flags per command
 - [x] Comprehensive test suite for all completion scenarios
 - [x] Added to pre-commit hook
+- [x] Fix portability: add fallback for _init_completion (works without bash-completion package)
 
 ---
 
