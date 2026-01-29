@@ -8,6 +8,17 @@ A CLI tool for managing isolated, authenticated development containers.
 
 Devbox spins up lightweight Docker containers pre-configured with GitHub CLI and Claude Code, cloned to a specified repository, with Nix-based development environments. Users authenticate once; credentials persist across container lifecycles.
 
+## Security Warning
+
+**This is research/work in progress. Known security issues exist.**
+
+- Do NOT use this tool fully unattended in production environments
+- Containers have access to sensitive credentials (GitHub tokens, AWS credentials, Claude API keys)
+- The project is under active development and has not undergone security review
+- Use only in controlled development environments where you understand the risks
+
+If you discover security issues, please report them responsibly via GitHub issues.
+
 ## Installation
 
 ### Prerequisites
