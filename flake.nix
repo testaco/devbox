@@ -80,6 +80,16 @@
             fi
             echo ""
 
+            # Install git hooks automatically
+            if [ -f "$PWD/.githooks/pre-commit" ]; then
+              mkdir -p "$PWD/.git/hooks"
+              if [ ! -L "$PWD/.git/hooks/pre-commit" ] || [ "$(readlink "$PWD/.git/hooks/pre-commit")" != "$PWD/.githooks/pre-commit" ]; then
+                ln -sf "$PWD/.githooks/pre-commit" "$PWD/.git/hooks/pre-commit"
+                echo "🔗 Git hooks installed (.githooks/pre-commit → .git/hooks/pre-commit)"
+              fi
+            fi
+            echo ""
+
             # Set up some convenience aliases
             alias devbox-test="./tests/test_cli_basic.sh"
             alias devbox-lint="shellcheck bin/devbox tests/*.sh"

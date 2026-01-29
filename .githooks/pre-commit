@@ -1,0 +1,130 @@
+#!/bin/bash
+set -e
+
+# Pre-commit hook for devbox
+# Runs linting, formatting, and tests before allowing commit
+
+# Colors for output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[0;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
+
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}Running pre-commit checks...${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+# Get list of bash files to check (staged files + always check main scripts)
+BASH_FILES=(
+    "bin/devbox"
+    "install.sh"
+    "docker/entrypoint.sh"
+    "docker/init-credentials.sh"
+    "tests/"*.sh
+    "completions/devbox.bash"
+)
+
+# Filter to only existing files
+EXISTING_FILES=()
+for file in "${BASH_FILES[@]}"; do
+    if [[ -f "$file" ]]; then
+        EXISTING_FILES+=("$file")
+    elif [[ "$file" == *"*"* ]]; then
+        # Handle glob patterns
+        for expanded in $file; do
+            [[ -f "$expanded" ]] && EXISTING_FILES+=("$expanded")
+        done
+    fi
+done
+
+# 1. LINTING with shellcheck
+echo -e "${YELLOW}[1/3]${NC} Running shellcheck..."
+# Exclude some less critical warnings:
+# SC2155 - Declare and assign separately (common pattern in this codebase)
+# SC2329 - Function never invoked (test helper functions)
+# SC1091 - Not following external sources (expected for system files)
+# SC1090 - Can't follow non-constant source (dynamic sourcing)
+# SC2034 - Variable appears unused (test setup variables)
+# SC2076 - Quotes in regex (intentional literal matching)
+# SC2086 - Double quote to prevent globbing (acceptable in [ ] comparisons)
+# SC2207 - Prefer mapfile (compgen output is safe)
+# SC2206 - Quote to prevent word splitting (intentional array operations)
+# SC2024 - sudo doesn't affect redirects (intentional pattern)
+if shellcheck --exclude=SC2155,SC2329,SC1091,SC1090,SC2034,SC2076,SC2086,SC2207,SC2206,SC2024 "${EXISTING_FILES[@]}" 2>&1; then
+    echo -e "${GREEN}✓${NC} Shellcheck passed"
+else
+    echo -e "${RED}✗${NC} Shellcheck failed"
+    echo -e "${RED}Please fix linting errors before committing${NC}"
+    exit 1
+fi
+echo ""
+
+# 2. FORMATTING with shfmt
+echo -e "${YELLOW}[2/3]${NC} Checking code formatting..."
+# Check if files need formatting (don't auto-format, just check)
+if shfmt -d "${EXISTING_FILES[@]}" 2>&1; then
+    echo -e "${GREEN}✓${NC} Code formatting is correct"
+else
+    echo -e "${RED}✗${NC} Code formatting issues found"
+    echo ""
+    echo -e "${YELLOW}Fix formatting by running:${NC}"
+    echo -e "  shfmt -w bin/devbox tests/*.sh docker/*.sh install.sh completions/devbox.bash"
+    echo ""
+    echo -e "Or use the alias:"
+    echo -e "  devbox-format"
+    exit 1
+fi
+echo ""
+
+# 3. RUNNING TESTS
+echo -e "${YELLOW}[3/3]${NC} Running tests..."
+echo ""
+
+# Run basic CLI tests (fast, no Docker required)
+if [[ -f "tests/test_cli_basic.sh" ]]; then
+    echo -e "${BLUE}Running basic CLI tests...${NC}"
+    if bash tests/test_cli_basic.sh; then
+        echo -e "${GREEN}✓${NC} Basic tests passed"
+    else
+        echo -e "${RED}✗${NC} Basic tests failed"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} No basic tests found, skipping..."
+fi
+echo ""
+
+# Check if Docker is available for integration tests
+if ! docker info >/dev/null 2>&1; then
+    echo -e "${YELLOW}⚠${NC} Docker not available, skipping integration tests"
+    echo -e "${YELLOW}  (Install Docker and start daemon to run full test suite)${NC}"
+else
+    # Run a subset of critical integration tests
+    # (Skip slow tests in pre-commit to keep it fast)
+    CRITICAL_TESTS=(
+        "tests/test_install.sh"
+        "tests/test_completion_standalone.sh"
+    )
+
+    for test_file in "${CRITICAL_TESTS[@]}"; do
+        if [[ -f "$test_file" ]]; then
+            test_name=$(basename "$test_file" .sh)
+            echo -e "${BLUE}Running $test_name...${NC}"
+            if bash "$test_file"; then
+                echo -e "${GREEN}✓${NC} $test_name passed"
+            else
+                echo -e "${RED}✗${NC} $test_name failed"
+                echo -e "${RED}Please fix test failures before committing${NC}"
+                exit 1
+            fi
+        fi
+    done
+fi
+
+echo ""
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}✓ All pre-commit checks passed!${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
