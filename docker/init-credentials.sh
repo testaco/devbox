@@ -2,39 +2,22 @@
 set -euo pipefail
 
 # Credential initialization script for devbox
-# This script runs inside a container to set up the credential volume
+# This script runs inside a container to set up Claude and AWS credentials
+# Note: GitHub auth is now handled via GITHUB_TOKEN (no OAuth needed)
 
 echo "=== Devbox Credential Initialization ==="
 
 # Create directory structure (will be owned by current user)
 echo "Setting up credential directory structure..."
-mkdir -p /devbox-credentials/gh
 mkdir -p /devbox-credentials/claude
 mkdir -p /devbox-credentials/aws
 
 echo "✓ Directory structure created"
 
-# Set environment variables for tools to use the credential directories
-export GH_CONFIG_DIR=/devbox-credentials/gh
+# Set environment variables for tools
 export CLAUDE_CONFIG_DIR=/devbox-credentials/claude
 export AWS_CONFIG_FILE=/devbox-credentials/aws/config
 export AWS_SHARED_CREDENTIALS_FILE=/devbox-credentials/aws/credentials
-
-echo "=== GitHub CLI Authentication ==="
-echo "Please authenticate with GitHub CLI..."
-echo "This will open a browser window for OAuth authentication."
-
-# GitHub CLI authentication
-gh auth login --web
-
-# Verify GitHub authentication
-if gh auth status >/dev/null 2>&1; then
-    echo "✓ GitHub CLI authentication successful"
-    gh auth status
-else
-    echo "✗ GitHub CLI authentication failed"
-    exit 1
-fi
 
 # Claude configuration import (before authentication)
 echo "=== Checking Claude Configuration ==="
