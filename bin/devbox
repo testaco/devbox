@@ -96,8 +96,8 @@ USAGE:
     devbox <command> [options]
 
 COMMANDS:
-    init                    One-time setup: authenticate GitHub CLI and Claude Code
-    create <name> <repo>    Create and start a new container instance
+    init                    One-time setup: authenticate Claude Code and AWS
+    create <name> <repo>    Create and start a new container instance (requires GITHUB_TOKEN)
     list                    List all devbox containers with status
     attach <name|id>        Attach to a running container's shell
     stop <name|id>          Stop a container (keeps state)
@@ -133,11 +133,13 @@ EXAMPLES:
     # First-time setup (Bedrock mode)
     devbox init --bedrock --import-aws
 
-    # Create container with port mapping
-    devbox create myapp git@github.com:org/repo.git --port 3000:3000
+    # Create container with GitHub token
+    export GITHUB_TOKEN="github_pat_xxx..."
+    devbox create myapp org/repo --port 3000:3000
 
     # Create container for Bedrock
-    devbox create myapp git@github.com:org/repo.git --bedrock --aws-profile prod
+    export GITHUB_TOKEN="github_pat_xxx..."
+    devbox create myapp org/repo --bedrock --aws-profile prod
 
     # List containers
     devbox list
@@ -183,7 +185,7 @@ cmd_init() {
                 ;;
             --help|-h)
                 cat << EOF
-devbox init - One-time setup: authenticate GitHub CLI and Claude Code
+devbox init - One-time setup: authenticate Claude Code and AWS
 
 USAGE:
     devbox init [options]
@@ -196,8 +198,13 @@ OPTIONS:
 
 DESCRIPTION:
     Performs initial setup by creating the credential volume and running
-    the authentication flow for GitHub CLI and Claude Code. Credentials
-    are stored in a Docker volume and shared across all devbox containers.
+    the authentication flow for Claude Code and AWS. Credentials are stored
+    in a Docker volume and shared across all devbox containers.
+
+    NOTE: GitHub authentication is now handled via GITHUB_TOKEN environment
+    variable instead of OAuth. Create a fine-grained token at:
+    GitHub → Settings → Developer settings → Fine-grained tokens
+
     Your existing ~/.claude/settings.json will be automatically imported.
 
     In Bedrock mode, AWS SSO profiles will be automatically detected and
@@ -387,11 +394,11 @@ cmd_create() {
 devbox create - Create and start a new container instance
 
 USAGE:
-    devbox create <name> <repo-url> [options]
+    devbox create <name> <repo> [options]
 
 ARGUMENTS:
     <name>                  Container name (must be unique)
-    <repo-url>              Git repository URL to clone
+    <repo>                  Repository in format: owner/repo
 
 OPTIONS:
     --port, -p <host:container>  Port mapping (repeatable)
@@ -399,20 +406,32 @@ OPTIONS:
     --aws-profile <profile>  AWS profile name
     --help, -h             Show this help message
 
+ENVIRONMENT:
+    GITHUB_TOKEN            Required - GitHub personal access token for repo access
+                           Create at: GitHub → Settings → Developer settings → Tokens
+
 DESCRIPTION:
     Creates a new development container with the specified repository cloned
     and ready for development. The container runs in detached mode with a
     persistent shell session.
 
+    GitHub authentication uses GITHUB_TOKEN environment variable (no OAuth).
+    Create a fine-grained token with:
+      - Repository access: Only select repositories
+      - Permissions: Contents: Read (or Read and Write for pushing)
+
 EXAMPLES:
+    # Set GitHub token first
+    export GITHUB_TOKEN="github_pat_xxx..."
+
     # Basic container
-    devbox create myapp git@github.com:org/repo.git
+    devbox create myapp org/repo
 
     # With port mapping
-    devbox create webapp git@github.com:org/webapp.git --port 3000:3000
+    devbox create webapp org/webapp --port 3000:3000
 
     # Bedrock mode with AWS profile
-    devbox create myapp git@github.com:org/repo.git --bedrock --aws-profile prod
+    devbox create myapp org/repo --bedrock --aws-profile prod
 
 EOF
                 return 0
@@ -438,13 +457,30 @@ EOF
     # Validate required arguments
     if [[ -z "$container_name" ]]; then
         log_error "Container name required"
-        log_error "Usage: devbox create <name> <repo-url>"
+        log_error "Usage: devbox create <name> <repo>"
         return 1
     fi
 
     if [[ -z "$repo_url" ]]; then
-        log_error "Repository URL required"
-        log_error "Usage: devbox create <name> <repo-url>"
+        log_error "Repository required (format: owner/repo)"
+        log_error "Usage: devbox create <name> <repo>"
+        return 1
+    fi
+
+    # Check for GITHUB_TOKEN
+    if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+        log_error "GITHUB_TOKEN environment variable required"
+        echo ""
+        echo "Create a fine-grained GitHub token at:"
+        echo "  GitHub → Settings → Developer settings → Fine-grained tokens"
+        echo ""
+        echo "Required permissions:"
+        echo "  • Repository access: Only select repositories"
+        echo "  • Permissions: Contents: Read (or Read and Write)"
+        echo ""
+        echo "Then export it:"
+        echo "  export GITHUB_TOKEN=\"github_pat_xxx...\""
+        echo ""
         return 1
     fi
 
@@ -466,7 +502,8 @@ EOF
 
     # Prepare environment variables
     local env_vars=""
-    env_vars="$env_vars -e DEVBOX_REPO_URL=$repo_url"
+    env_vars="$env_vars -e DEVBOX_REPO=$repo_url"
+    env_vars="$env_vars -e GITHUB_TOKEN=$GITHUB_TOKEN"
 
     # Configure authentication mode
     local auth_mode="oauth"
