@@ -11,9 +11,10 @@ DEVBOX_CLI="$PROJECT_ROOT/bin/devbox"
 
 # Test constants
 readonly TEST_CONTAINER_PREFIX="devbox-test-"
-readonly TEST_REPO="https://github.com/test/test-repo.git"
+readonly TEST_REPO="test/test-repo"  # New format: owner/repo
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m'
 
 # Test state
@@ -32,6 +33,24 @@ log_fail() {
 
 log_info() {
     echo -e "${GREEN}INFO:${NC} $*"
+}
+
+log_warning() {
+    echo -e "${YELLOW}WARN:${NC} $*"
+}
+
+# Setup GITHUB_TOKEN for tests
+setup_github_token() {
+    # If GITHUB_TOKEN is already set, use it
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        log_info "Using existing GITHUB_TOKEN from environment"
+        return 0
+    fi
+
+    # For dry-run tests, we need a token (even a fake one) to pass validation
+    # Real operations won't happen in dry-run mode
+    export GITHUB_TOKEN="github_pat_test_token_for_dry_run_only"
+    log_warning "No GITHUB_TOKEN found, using test token for dry-run tests only"
 }
 
 # Cleanup function
@@ -107,11 +126,11 @@ test_create_missing_repo() {
 
     # Test with name but no repo
     output=$("$DEVBOX_CLI" create test-container 2>&1) || exit_code=$?
-    if [[ $exit_code -ne 0 ]] && [[ "$output" == *"Repository URL required"* ]]; then
+    if [[ $exit_code -ne 0 ]] && [[ "$output" == *"Repository required"* ]]; then
         log_test "create with name but no repo shows appropriate error"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
-        log_fail "create should require repository URL"
+        log_fail "create should require repository (format: owner/repo)"
         echo "Output was: $output"
         echo "Exit code was: ${exit_code:-0}"
     fi
@@ -198,8 +217,8 @@ test_create_name_already_exists() {
     container_id=$(docker run -d --name devbox-test-existing alpine sleep 3600)
     CLEANUP_CONTAINERS+=("$container_id")
 
-    # Try to create another container with the same name
-    output=$("$DEVBOX_CLI" create existing "$TEST_REPO" 2>&1) || exit_code=$?
+    # Try to create another container with the same name (using dry-run to avoid token issues)
+    output=$("$DEVBOX_CLI" create existing "$TEST_REPO" --dry-run 2>&1) || exit_code=$?
 
     if [[ $exit_code -ne 0 ]] && [[ "$output" == *"already exists"* ]]; then
         log_test "create rejects duplicate container names"
@@ -253,6 +272,9 @@ main() {
         echo "Docker daemon not running, skipping tests"
         exit 1
     fi
+
+    # Setup GITHUB_TOKEN for tests
+    setup_github_token
 
     # Clean up any leftover containers from previous runs
     initial_cleanup
