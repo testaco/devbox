@@ -4,42 +4,32 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+
+    # Import the base flake for core development tools
+    devbox-base.url = "path:./base-flake";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, devbox-base }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+
+        # Get base development shell from devbox-base flake
+        baseShell = devbox-base.devShells.${system}.default;
       in {
         devShells.default = pkgs.mkShell {
+          # Inherit all base platform tools (git, gh, claude-code, aws, jq, vim, etc.)
+          inputsFrom = [ baseShell ];
+
+          # Add devbox-specific development tools
           buildInputs = with pkgs; [
-            # Core development tools
-            bash
-            git
+            # Docker tools (not in base, specific to devbox development)
             docker
             docker-compose
 
-            # CLI development and testing
-            shellcheck       # Bash linting and static analysis
-            shfmt           # Bash formatter
-            bats            # Bash testing framework (alternative to custom tests)
-
-            # Text editors and development
-            vim
-            nano
-
-            # Utilities for development workflow
-            curl
-            jq              # JSON processing (useful for Docker API interactions)
-            tree            # Directory tree visualization
-            htop            # Process monitoring
-
-            # GitHub CLI (for testing/development workflows)
-            gh
-
-            # Node.js and Claude Code (matching the Docker environment)
+            # Node.js for potential future extensions
             nodejs_20
-          ] ++ lib.optionals stdenv.isDarwin [
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             # macOS-specific tools
             colima          # Docker Desktop alternative for macOS
           ];
@@ -47,13 +37,21 @@
           shellHook = ''
             echo "🛠️  Devbox development environment loaded"
             echo ""
-            echo "Available tools:"
-            echo "  • docker          - Container management (ensure Docker daemon is running)"
-            echo "  • shellcheck      - Bash linting (shellcheck bin/devbox tests/*.sh)"
-            echo "  • shfmt          - Bash formatting (shfmt -w bin/devbox tests/*.sh)"
-            echo "  • gh             - GitHub CLI"
-            echo "  • jq             - JSON processing"
-            echo "  • tree           - Directory visualization"
+            echo "📦 Base platform tools (from devbox-base flake):"
+            echo "  • git, gh         - Version control and GitHub CLI"
+            echo "  • claude          - Claude Code AI assistant"
+            echo "  • aws             - AWS CLI v2"
+            echo "  • shellcheck      - Bash linting"
+            echo "  • shfmt           - Bash formatting"
+            echo "  • bats            - Bash testing framework"
+            echo "  • jq, yq          - JSON/YAML processing"
+            echo "  • vim, nano       - Text editors"
+            echo "  • tree, htop      - Utilities"
+            echo ""
+            echo "🐳 Devbox-specific tools:"
+            echo "  • docker          - Container management"
+            echo "  • docker-compose  - Multi-container orchestration"
+            echo "  • nodejs          - Node.js runtime"
             echo ""
             echo "Development workflow:"
             echo "  • Run tests:      ./tests/test_cli_basic.sh"
@@ -87,6 +85,7 @@
             export PATH="$PWD/bin:$PATH"
 
             echo "🚀 Ready to develop devbox! Try 'devbox help' to test the CLI"
+            echo "💡 Base tools inherited from: base-flake/flake.nix"
           '';
 
           # Environment variables
