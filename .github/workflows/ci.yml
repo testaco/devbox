@@ -52,20 +52,27 @@ jobs:
           tests/*.sh \
           completions/devbox.bash
 
-    - name: Run basic CLI tests
+    - name: Run all tests
       run: |
-        echo "Running basic CLI tests..."
-        bash tests/test_cli_basic.sh
+        echo "Running all tests..."
 
-    - name: Run installation tests
-      run: |
-        echo "Running installation tests..."
-        bash tests/test_install.sh
+        # Run all test files
+        EXIT_CODE=0
+        for test_file in tests/test_*.sh; do
+          if [[ -f "$test_file" ]]; then
+            test_name=$(basename "$test_file" .sh)
+            echo ""
+            echo "==== Running $test_name ===="
+            if bash "$test_file"; then
+              echo "✓ $test_name passed"
+            else
+              echo "✗ $test_name failed"
+              EXIT_CODE=1
+            fi
+          fi
+        done
 
-    - name: Run completion tests
-      run: |
-        echo "Running completion tests..."
-        bash tests/test_completion_standalone.sh
+        exit $EXIT_CODE
 
     - name: Summary
       if: success()

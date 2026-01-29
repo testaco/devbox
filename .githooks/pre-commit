@@ -102,15 +102,9 @@ if ! docker info >/dev/null 2>&1; then
     echo -e "${YELLOW}⚠${NC} Docker not available, skipping integration tests"
     echo -e "${YELLOW}  (Install Docker and start daemon to run full test suite)${NC}"
 else
-    # Run a subset of critical integration tests
-    # (Skip slow tests in pre-commit to keep it fast)
-    CRITICAL_TESTS=(
-        "tests/test_install.sh"
-        "tests/test_completion_standalone.sh"
-    )
-
-    for test_file in "${CRITICAL_TESTS[@]}"; do
-        if [[ -f "$test_file" ]]; then
+    # Run all integration tests
+    for test_file in tests/test_*.sh; do
+        if [[ -f "$test_file" && "$test_file" != "tests/test_cli_basic.sh" ]]; then
             test_name=$(basename "$test_file" .sh)
             echo -e "${BLUE}Running $test_name...${NC}"
             if bash "$test_file"; then
