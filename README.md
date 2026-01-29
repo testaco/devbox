@@ -1,5 +1,7 @@
 # Devbox
 
+[![CI](https://github.com/testaco/devbox/workflows/CI/badge.svg)](https://github.com/testaco/devbox/actions/workflows/ci.yml)
+
 A CLI tool for managing isolated, authenticated development containers.
 
 ## Overview

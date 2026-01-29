@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install shellcheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+
+    - name: Install shfmt
+      run: |
+        curl -sS https://webinstall.dev/shfmt | bash
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Run shellcheck
+      run: |
+        echo "Running shellcheck..."
+        shellcheck --version
+
+        # Check all bash files
+        shellcheck --exclude=SC2155,SC2329,SC1091,SC1090,SC2034,SC2076,SC2086,SC2207,SC2206,SC2024 \
+          bin/devbox \
+          install.sh \
+          docker/entrypoint.sh \
+          docker/init-credentials.sh \
+          tests/*.sh \
+          completions/devbox.bash
+
+    - name: Check code formatting
+      run: |
+        echo "Checking code formatting..."
+        shfmt -version
+
+        # Check if files need formatting (exit with error if diff found)
+        shfmt -d \
+          bin/devbox \
+          install.sh \
+          docker/entrypoint.sh \
+          docker/init-credentials.sh \
+          tests/*.sh \
+          completions/devbox.bash
+
+    - name: Run basic CLI tests
+      run: |
+        echo "Running basic CLI tests..."
+        bash tests/test_cli_basic.sh
+
+    - name: Run installation tests
+      run: |
+        echo "Running installation tests..."
+        bash tests/test_install.sh
+
+    - name: Run completion tests
+      run: |
+        echo "Running completion tests..."
+        bash tests/test_completion_standalone.sh
+
+    - name: Summary
+      if: success()
+      run: |
+        echo "✅ All checks passed!"
