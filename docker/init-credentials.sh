@@ -23,156 +23,156 @@ export AWS_SHARED_CREDENTIALS_FILE=/devbox-credentials/aws/credentials
 echo "=== Checking Claude Configuration ==="
 # Check if credentials already exist (may have been copied as root earlier)
 if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
-    echo "✓ Claude credentials already present"
-    ls -la /devbox-credentials/claude/.credentials.json
+	echo "✓ Claude credentials already present"
+	ls -la /devbox-credentials/claude/.credentials.json
 elif [[ -f /host-claude/.credentials.json ]]; then
-    echo "Copying Claude credentials from host..."
-    cp /host-claude/.credentials.json /devbox-credentials/claude/.credentials.json 2>/dev/null || {
-        echo "Note: Credentials will be imported by root process"
-    }
+	echo "Copying Claude credentials from host..."
+	cp /host-claude/.credentials.json /devbox-credentials/claude/.credentials.json 2>/dev/null || {
+		echo "Note: Credentials will be imported by root process"
+	}
 fi
 
 if [[ -f /devbox-credentials/claude/settings.json ]]; then
-    echo "✓ Claude settings already present"
+	echo "✓ Claude settings already present"
 elif [[ -f /host-claude/settings.json ]]; then
-    echo "Copying Claude settings.json from host..."
-    cp /host-claude/settings.json /devbox-credentials/claude/settings.json 2>/dev/null || {
-        echo "Note: Settings will be imported by root process"
-    }
+	echo "Copying Claude settings.json from host..."
+	cp /host-claude/settings.json /devbox-credentials/claude/settings.json 2>/dev/null || {
+		echo "Note: Settings will be imported by root process"
+	}
 fi
 
 # Claude authentication (only if not in Bedrock mode)
 if [[ "${BEDROCK_MODE:-false}" != "true" ]]; then
-    # Check if credentials were already imported from host
-    if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
-        echo "=== Claude Code Authentication ==="
-        echo "✓ Claude credentials already imported from host system"
-    else
-        echo "=== Claude Code Authentication ==="
-        echo "Please authenticate with Claude Code..."
-        echo "This will open a browser window for OAuth authentication."
+	# Check if credentials were already imported from host
+	if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
+		echo "=== Claude Code Authentication ==="
+		echo "✓ Claude credentials already imported from host system"
+	else
+		echo "=== Claude Code Authentication ==="
+		echo "Please authenticate with Claude Code..."
+		echo "This will open a browser window for OAuth authentication."
 
-        # Claude Code authentication - just run claude to trigger OAuth flow
-        claude --version >/dev/null || {
-            echo "Starting Claude Code authentication..."
-            # Claude Code will handle the OAuth flow when first run
-            claude || {
-                echo "✗ Claude Code authentication failed"
-                exit 1
-            }
-        }
+		# Claude Code authentication - just run claude to trigger OAuth flow
+		claude --version >/dev/null || {
+			echo "Starting Claude Code authentication..."
+			# Claude Code will handle the OAuth flow when first run
+			claude || {
+				echo "✗ Claude Code authentication failed"
+				exit 1
+			}
+		}
 
-        if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
-            echo "✓ Claude Code authentication successful"
-        else
-            echo "✗ Claude Code authentication failed - no credentials file found"
-            exit 1
-        fi
-    fi
+		if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
+			echo "✓ Claude Code authentication successful"
+		else
+			echo "✗ Claude Code authentication failed - no credentials file found"
+			exit 1
+		fi
+	fi
 else
-    echo "=== Skipping Claude OAuth (Bedrock mode) ==="
-    echo "AWS Bedrock mode enabled - Claude authentication will use AWS credentials"
+	echo "=== Skipping Claude OAuth (Bedrock mode) ==="
+	echo "AWS Bedrock mode enabled - Claude authentication will use AWS credentials"
 fi
 
 # AWS credentials setup
 if [[ "${IMPORT_AWS:-false}" == "true" ]]; then
-    echo "=== Importing AWS Credentials ==="
-    if [[ -d /host-aws ]]; then
-        echo "Copying existing AWS credentials from host..."
-        cp /host-aws/* /devbox-credentials/aws/ 2>/dev/null || true
-        echo "✓ AWS credentials imported"
-        ls -la /devbox-credentials/aws/
-    elif [[ -d ~/.aws ]]; then
-        echo "Copying existing AWS credentials from ~/.aws..."
-        cp ~/.aws/* /devbox-credentials/aws/ 2>/dev/null || true
-        echo "✓ AWS credentials imported"
-        ls -la /devbox-credentials/aws/
-    else
-        echo "No existing AWS credentials found"
-    fi
+	echo "=== Importing AWS Credentials ==="
+	if [[ -d /host-aws ]]; then
+		echo "Copying existing AWS credentials from host..."
+		cp /host-aws/* /devbox-credentials/aws/ 2>/dev/null || true
+		echo "✓ AWS credentials imported"
+		ls -la /devbox-credentials/aws/
+	elif [[ -d ~/.aws ]]; then
+		echo "Copying existing AWS credentials from ~/.aws..."
+		cp ~/.aws/* /devbox-credentials/aws/ 2>/dev/null || true
+		echo "✓ AWS credentials imported"
+		ls -la /devbox-credentials/aws/
+	else
+		echo "No existing AWS credentials found"
+	fi
 
-    # Handle SSO login for Bedrock mode
-    if [[ "${BEDROCK_MODE:-false}" == "true" ]]; then
-        echo "=== AWS SSO Authentication ==="
+	# Handle SSO login for Bedrock mode
+	if [[ "${BEDROCK_MODE:-false}" == "true" ]]; then
+		echo "=== AWS SSO Authentication ==="
 
-        # Check if we have SSO profiles that need authentication
-        if [[ -f /devbox-credentials/aws/config ]]; then
-            echo "Checking for AWS SSO profiles..."
+		# Check if we have SSO profiles that need authentication
+		if [[ -f /devbox-credentials/aws/config ]]; then
+			echo "Checking for AWS SSO profiles..."
 
-            # Look for any SSO configuration
-            if grep -q "sso_start_url" /devbox-credentials/aws/config 2>/dev/null; then
-                echo "Detected AWS SSO configuration. Bedrock mode requires valid SSO tokens."
-                echo ""
+			# Look for any SSO configuration
+			if grep -q "sso_start_url" /devbox-credentials/aws/config 2>/dev/null; then
+				echo "Detected AWS SSO configuration. Bedrock mode requires valid SSO tokens."
+				echo ""
 
-                # Find all profiles with SSO configuration
-                current_profile=""
-                sso_profiles=()
+				# Find all profiles with SSO configuration
+				current_profile=""
+				sso_profiles=()
 
-                while IFS= read -r line; do
-                    if [[ $line =~ ^\[profile\ (.+)\]$ ]]; then
-                        current_profile="${BASH_REMATCH[1]}"
-                    elif [[ $line =~ ^\[default\]$ ]]; then
-                        current_profile="default"
-                    elif [[ $line =~ ^sso_start_url && -n "$current_profile" ]]; then
-                        sso_profiles+=("$current_profile")
-                        current_profile=""
-                    fi
-                done < /devbox-credentials/aws/config
+				while IFS= read -r line; do
+					if [[ $line =~ ^\[profile\ (.+)\]$ ]]; then
+						current_profile="${BASH_REMATCH[1]}"
+					elif [[ $line =~ ^\[default\]$ ]]; then
+						current_profile="default"
+					elif [[ $line =~ ^sso_start_url && -n "$current_profile" ]]; then
+						sso_profiles+=("$current_profile")
+						current_profile=""
+					fi
+				done </devbox-credentials/aws/config
 
-                if [[ ${#sso_profiles[@]} -gt 0 ]]; then
-                    echo "Found SSO profiles: ${sso_profiles[*]}"
-                    echo ""
+				if [[ ${#sso_profiles[@]} -gt 0 ]]; then
+					echo "Found SSO profiles: ${sso_profiles[*]}"
+					echo ""
 
-                    # Check if a specific profile was requested
-                    if [[ -n "${AWS_SSO_PROFILE:-}" ]]; then
-                        # Authenticate only the specified profile
-                        if [[ " ${sso_profiles[*]} " =~ " ${AWS_SSO_PROFILE} " ]]; then
-                            echo "Authenticating specified AWS SSO profile: $AWS_SSO_PROFILE"
-                            echo "This will display a device code - please follow the instructions..."
-                            echo ""
+					# Check if a specific profile was requested
+					if [[ -n "${AWS_SSO_PROFILE:-}" ]]; then
+						# Authenticate only the specified profile
+						if [[ " ${sso_profiles[*]} " =~ " ${AWS_SSO_PROFILE} " ]]; then
+							echo "Authenticating specified AWS SSO profile: $AWS_SSO_PROFILE"
+							echo "This will display a device code - please follow the instructions..."
+							echo ""
 
-                            if aws sso login --profile "$AWS_SSO_PROFILE" --use-device-code; then
-                                echo "✓ SSO login successful for profile: $AWS_SSO_PROFILE"
-                            else
-                                echo "✗ SSO login failed for profile: $AWS_SSO_PROFILE"
-                                echo "You can retry this later with: aws sso login --profile $AWS_SSO_PROFILE --use-device-code"
-                            fi
-                        else
-                            echo "✗ Specified profile '$AWS_SSO_PROFILE' not found in SSO profiles: ${sso_profiles[*]}"
-                            echo "Available profiles: ${sso_profiles[*]}"
-                        fi
-                    else
-                        # Authenticate all SSO profiles (original behavior)
-                        echo "Authenticating all SSO profiles..."
-                        for profile in "${sso_profiles[@]}"; do
-                            echo "Logging in to AWS SSO profile: $profile"
-                            echo "This will display a device code - please follow the instructions..."
-                            echo ""
+							if aws sso login --profile "$AWS_SSO_PROFILE" --use-device-code; then
+								echo "✓ SSO login successful for profile: $AWS_SSO_PROFILE"
+							else
+								echo "✗ SSO login failed for profile: $AWS_SSO_PROFILE"
+								echo "You can retry this later with: aws sso login --profile $AWS_SSO_PROFILE --use-device-code"
+							fi
+						else
+							echo "✗ Specified profile '$AWS_SSO_PROFILE' not found in SSO profiles: ${sso_profiles[*]}"
+							echo "Available profiles: ${sso_profiles[*]}"
+						fi
+					else
+						# Authenticate all SSO profiles (original behavior)
+						echo "Authenticating all SSO profiles..."
+						for profile in "${sso_profiles[@]}"; do
+							echo "Logging in to AWS SSO profile: $profile"
+							echo "This will display a device code - please follow the instructions..."
+							echo ""
 
-                            if aws sso login --profile "$profile" --use-device-code; then
-                                echo "✓ SSO login successful for profile: $profile"
-                            else
-                                echo "✗ SSO login failed for profile: $profile"
-                                echo "You can retry this later with: aws sso login --profile $profile --use-device-code"
-                            fi
-                            echo ""
-                        done
-                    fi
-                else
-                    echo "Could not parse SSO profiles from config file"
-                fi
-            else
-                echo "No SSO configuration detected - skipping SSO login"
-            fi
-        else
-            echo "No AWS config file found - skipping SSO login"
-        fi
-    fi
+							if aws sso login --profile "$profile" --use-device-code; then
+								echo "✓ SSO login successful for profile: $profile"
+							else
+								echo "✗ SSO login failed for profile: $profile"
+								echo "You can retry this later with: aws sso login --profile $profile --use-device-code"
+							fi
+							echo ""
+						done
+					fi
+				else
+					echo "Could not parse SSO profiles from config file"
+				fi
+			else
+				echo "No SSO configuration detected - skipping SSO login"
+			fi
+		else
+			echo "No AWS config file found - skipping SSO login"
+		fi
+	fi
 else
-    echo "=== Manual AWS Setup ==="
-    echo "To configure AWS credentials manually, you can:"
-    echo "1. Use 'aws configure' inside a devbox container"
-    echo "2. Or copy your ~/.aws/ files to the credential volume"
+	echo "=== Manual AWS Setup ==="
+	echo "To configure AWS credentials manually, you can:"
+	echo "1. Use 'aws configure' inside a devbox container"
+	echo "2. Or copy your ~/.aws/ files to the credential volume"
 fi
 
 echo "=== Initialization Summary ==="
@@ -183,9 +183,9 @@ echo ""
 echo "✓ Devbox initialization completed successfully!"
 echo ""
 if [[ "${BEDROCK_MODE:-false}" == "true" ]]; then
-    echo "Mode: AWS Bedrock"
-    echo "Authentication: GitHub CLI + AWS credentials"
+	echo "Mode: AWS Bedrock"
+	echo "Authentication: GitHub CLI + AWS credentials"
 else
-    echo "Mode: Claude OAuth"
-    echo "Authentication: GitHub CLI + Claude OAuth"
+	echo "Mode: Claude OAuth"
+	echo "Authentication: GitHub CLI + Claude OAuth"
 fi
