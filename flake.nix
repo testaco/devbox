@@ -27,6 +27,11 @@
             docker
             docker-compose
 
+            # Shell development tools (needed for this project)
+            shellcheck
+            shfmt
+            bats
+
             # Node.js for potential future extensions
             nodejs_20
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [

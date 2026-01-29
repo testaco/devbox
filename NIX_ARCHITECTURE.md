@@ -124,7 +124,6 @@ claude-code.url = "github:sadjow/claude-code-nix";
 - **AWS:** awscli2
 - **Utilities:** curl, jq, yq-go, tree, htop, wget
 - **Editors:** vim, nano
-- **Shell dev:** shellcheck, shfmt, bats
 
 **Exports:**
 - `lib.basePackages` - for advanced composition

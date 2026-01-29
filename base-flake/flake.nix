@@ -37,11 +37,6 @@
           vim
           nano
 
-          # Shell development tools
-          shellcheck
-          shfmt
-          bats
-
           # AWS CLI
           awscli2
         ] ++ [
@@ -68,7 +63,6 @@
             echo "  • aws              - AWS CLI v2"
             echo "  • jq, yq           - JSON and YAML processing"
             echo "  • vim, nano        - Text editors"
-            echo "  • shellcheck, shfmt, bats - Shell development"
             echo "  • tree, htop       - System utilities"
             echo ""
           '';
