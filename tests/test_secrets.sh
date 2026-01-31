@@ -119,7 +119,7 @@ else
 fi
 
 run_test "secrets add with --from-file reads from file"
-echo "file-secret-content" > "$TEST_SECRETS_DIR/input.txt"
+echo "file-secret-content" >"$TEST_SECRETS_DIR/input.txt"
 OUTPUT=$("$DEVBOX_BIN" secrets add file-secret --from-file "$TEST_SECRETS_DIR/input.txt" 2>&1)
 if [[ $? -eq 0 ]] && echo "$OUTPUT" | grep -qi "added\|stored\|success"; then
 	test_passed "secrets add --from-file works"

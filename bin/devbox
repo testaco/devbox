@@ -1967,7 +1967,7 @@ EOF
 	# Use umask to ensure file is created with correct permissions
 	(
 		umask 077
-		echo -n "$secret_value" > "$secret_path"
+		echo -n "$secret_value" >"$secret_path"
 	)
 	chmod 600 "$secret_path"
 
