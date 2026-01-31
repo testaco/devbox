@@ -11,6 +11,9 @@ readonly CONTAINER_PREFIX="devbox-"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Secrets directory (can be overridden via environment for testing)
+DEVBOX_SECRETS_DIR="${DEVBOX_SECRETS_DIR:-$HOME/.devbox/secrets}"
+
 # Colors for output
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -106,6 +109,7 @@ COMMANDS:
     logs <name|id>          View container logs
     exec <name|id> <cmd>    Execute a command in a running container
     ports <name|id>         Show port mappings for a container
+    secrets <subcommand>    Manage secrets (add, remove, list, path)
     help                    Show this help message
 
 INIT OPTIONS:
@@ -1788,12 +1792,468 @@ EOF
 	fi
 }
 
+# ==============================================================================
+# Secrets Management Commands
+# ==============================================================================
+
+# Validate secret name (alphanumeric, dashes, underscores only)
+validate_secret_name() {
+	local name="$1"
+	if [[ ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+		return 1
+	fi
+	return 0
+}
+
+# Ensure secrets directory exists with proper permissions
+ensure_secrets_dir() {
+	if [[ ! -d "$DEVBOX_SECRETS_DIR" ]]; then
+		mkdir -p "$DEVBOX_SECRETS_DIR"
+		chmod 700 "$DEVBOX_SECRETS_DIR"
+	fi
+}
+
+# Get path to a secret file
+get_secret_path() {
+	local name="$1"
+	echo "$DEVBOX_SECRETS_DIR/$name"
+}
+
+cmd_secrets_add() {
+	local secret_name=""
+	local from_env=""
+	local from_file=""
+	local force=false
+
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--from-env)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires an argument"
+				return 1
+			fi
+			from_env="$2"
+			shift 2
+			;;
+		--from-file)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires an argument"
+				return 1
+			fi
+			from_file="$2"
+			shift 2
+			;;
+		--force | -f)
+			force=true
+			shift
+			;;
+		--help | -h)
+			cat <<EOF
+devbox secrets add - Add a secret to secure storage
+
+USAGE:
+    devbox secrets add <name> [options]
+
+ARGUMENTS:
+    <name>                  Secret name (alphanumeric, dashes, underscores only)
+
+OPTIONS:
+    --from-env <VAR>       Read secret value from environment variable
+    --from-file <path>     Read secret value from file
+    --force, -f            Overwrite existing secret without confirmation
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Adds a secret to devbox's secure storage. Secrets are stored with restricted
+    file permissions (600) in ~/.devbox/secrets/. Secret values are NEVER shown
+    in command output or logs.
+
+    You must specify either --from-env or --from-file to provide the secret value.
+    Interactive input (prompting for value) is not supported to ensure secrets
+    aren't accidentally logged or exposed.
+
+EXAMPLES:
+    # Add secret from environment variable
+    export MY_TOKEN="secret-value"
+    devbox secrets add github-token --from-env MY_TOKEN
+
+    # Add secret from file
+    devbox secrets add api-key --from-file ~/.secrets/api-key.txt
+
+    # Overwrite existing secret
+    devbox secrets add github-token --from-env NEW_TOKEN --force
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			if [[ -z "$secret_name" ]]; then
+				secret_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				return 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	# Validate required arguments
+	if [[ -z "$secret_name" ]]; then
+		log_error "Secret name is required"
+		log_error "Usage: devbox secrets add <name> --from-env <VAR> or --from-file <path>"
+		return 1
+	fi
+
+	# Validate secret name
+	if ! validate_secret_name "$secret_name"; then
+		log_error "Invalid secret name: '$secret_name'"
+		log_error "Secret names must contain only alphanumeric characters, dashes, and underscores"
+		return 1
+	fi
+
+	# Must specify source
+	if [[ -z "$from_env" ]] && [[ -z "$from_file" ]]; then
+		log_error "Must specify secret source with --from-env or --from-file"
+		return 1
+	fi
+
+	# Can't specify both
+	if [[ -n "$from_env" ]] && [[ -n "$from_file" ]]; then
+		log_error "Cannot specify both --from-env and --from-file"
+		return 1
+	fi
+
+	# Get secret value
+	local secret_value=""
+	if [[ -n "$from_env" ]]; then
+		# Read from environment variable
+		if [[ -z "${!from_env:-}" ]]; then
+			log_error "Environment variable '$from_env' is not set or empty"
+			return 1
+		fi
+		secret_value="${!from_env}"
+	elif [[ -n "$from_file" ]]; then
+		# Read from file
+		if [[ ! -f "$from_file" ]]; then
+			log_error "File does not exist: $from_file"
+			return 1
+		fi
+		secret_value=$(cat "$from_file")
+	fi
+
+	# Ensure secrets directory exists
+	ensure_secrets_dir
+
+	# Check for existing secret
+	local secret_path
+	secret_path=$(get_secret_path "$secret_name")
+
+	if [[ -f "$secret_path" ]]; then
+		if [[ "$force" != true ]]; then
+			log_error "Secret '$secret_name' already exists"
+			log_error "Use --force to overwrite"
+			return 1
+		fi
+		log_info "Overwriting existing secret '$secret_name'"
+	fi
+
+	# Write secret with restricted permissions
+	# Use umask to ensure file is created with correct permissions
+	(
+		umask 077
+		echo -n "$secret_value" > "$secret_path"
+	)
+	chmod 600 "$secret_path"
+
+	log_success "Secret '$secret_name' added successfully"
+}
+
+cmd_secrets_remove() {
+	local secret_name=""
+	local force=false
+
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--force | -f)
+			force=true
+			shift
+			;;
+		--help | -h)
+			cat <<EOF
+devbox secrets remove - Remove a secret from storage
+
+USAGE:
+    devbox secrets remove <name> [options]
+
+ARGUMENTS:
+    <name>                  Secret name to remove
+
+OPTIONS:
+    --force, -f            Skip confirmation prompt
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Removes a secret from devbox's secure storage. By default, prompts for
+    confirmation before removal. Use --force to skip the confirmation.
+
+EXAMPLES:
+    # Remove a secret (with confirmation)
+    devbox secrets remove github-token
+
+    # Remove without confirmation
+    devbox secrets remove github-token --force
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			if [[ -z "$secret_name" ]]; then
+				secret_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				return 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	# Validate required arguments
+	if [[ -z "$secret_name" ]]; then
+		log_error "Secret name is required"
+		log_error "Usage: devbox secrets remove <name>"
+		return 1
+	fi
+
+	# Check if secret exists
+	local secret_path
+	secret_path=$(get_secret_path "$secret_name")
+
+	if [[ ! -f "$secret_path" ]]; then
+		log_error "Secret '$secret_name' does not exist"
+		return 1
+	fi
+
+	# Confirm removal unless --force
+	if [[ "$force" != true ]]; then
+		read -r -p "Remove secret '$secret_name'? [y/N] " response
+		if [[ ! "$response" =~ ^[Yy]$ ]]; then
+			log_info "Operation cancelled"
+			return 0
+		fi
+	fi
+
+	# Remove the secret
+	rm -f "$secret_path"
+	log_success "Secret '$secret_name' removed successfully"
+}
+
+cmd_secrets_list() {
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--help | -h)
+			cat <<EOF
+devbox secrets list - List all stored secrets
+
+USAGE:
+    devbox secrets list [options]
+
+OPTIONS:
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Lists all secrets stored in devbox's secure storage. Shows secret names
+    only - secret values are NEVER displayed.
+
+EXAMPLES:
+    # List all secrets
+    devbox secrets list
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			log_error "Unexpected argument: $1"
+			return 1
+			;;
+		esac
+	done
+
+	# Ensure secrets directory exists
+	ensure_secrets_dir
+
+	# Check if any secrets exist
+	if [[ ! -d "$DEVBOX_SECRETS_DIR" ]] || [[ -z "$(ls -A "$DEVBOX_SECRETS_DIR" 2>/dev/null)" ]]; then
+		log_info "No secrets stored"
+		echo
+		echo "Add secrets with:"
+		echo "  devbox secrets add <name> --from-env <VAR>"
+		echo "  devbox secrets add <name> --from-file <path>"
+		return 0
+	fi
+
+	# List secrets
+	log_info "Stored secrets:"
+	echo
+	printf "%-30s %s\n" "NAME" "MODIFIED"
+	printf "%-30s %s\n" "----" "--------"
+
+	for secret_file in "$DEVBOX_SECRETS_DIR"/*; do
+		if [[ -f "$secret_file" ]]; then
+			local name modified
+			name=$(basename "$secret_file")
+			# Get modification time - cross-platform
+			if stat --version &>/dev/null; then
+				# GNU stat (Linux)
+				modified=$(stat -c '%y' "$secret_file" 2>/dev/null | cut -d'.' -f1)
+			else
+				# BSD stat (macOS)
+				modified=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$secret_file" 2>/dev/null)
+			fi
+			printf "%-30s %s\n" "$name" "$modified"
+		fi
+	done
+}
+
+cmd_secrets_path() {
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--help | -h)
+			cat <<EOF
+devbox secrets path - Show the secrets storage directory
+
+USAGE:
+    devbox secrets path [options]
+
+OPTIONS:
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Displays the path to devbox's secrets storage directory.
+
+EXAMPLES:
+    # Show secrets path
+    devbox secrets path
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			log_error "Unexpected argument: $1"
+			return 1
+			;;
+		esac
+	done
+
+	echo "$DEVBOX_SECRETS_DIR"
+}
+
+cmd_secrets() {
+	# Parse arguments and flags
+	if [[ $# -eq 0 ]]; then
+		cat <<EOF
+devbox secrets - Manage secrets for containers
+
+USAGE:
+    devbox secrets <subcommand> [options]
+
+SUBCOMMANDS:
+    add <name>             Add a secret to secure storage
+    remove <name>          Remove a secret from storage
+    list                   List all stored secrets
+    path                   Show the secrets storage directory
+
+OPTIONS:
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Manages secrets that can be passed to containers. Secrets are stored
+    with restricted permissions (600) and never displayed in output.
+
+EXAMPLES:
+    # Add a secret from environment variable
+    export GITHUB_TOKEN="ghp_xxx..."
+    devbox secrets add github-token --from-env GITHUB_TOKEN
+
+    # List all secrets
+    devbox secrets list
+
+    # Remove a secret
+    devbox secrets remove github-token
+
+    # Show secrets directory
+    devbox secrets path
+
+For more information on a subcommand, run:
+    devbox secrets <subcommand> --help
+
+EOF
+		return 0
+	fi
+
+	local subcommand="$1"
+	shift
+
+	case "$subcommand" in
+	--help | -h)
+		cmd_secrets
+		return 0
+		;;
+	add)
+		cmd_secrets_add "$@"
+		;;
+	remove | rm)
+		cmd_secrets_remove "$@"
+		;;
+	list | ls)
+		cmd_secrets_list "$@"
+		;;
+	path)
+		cmd_secrets_path "$@"
+		;;
+	*)
+		log_error "Unknown secrets subcommand: $subcommand"
+		echo
+		cmd_secrets
+		return 1
+		;;
+	esac
+}
+
 # Main command dispatcher
 main() {
 	# Check for help first
 	if [[ $# -eq 0 ]] || [[ "$1" == "help" ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
 		usage
 		exit 0
+	fi
+
+	# Handle secrets command early (doesn't require Docker)
+	if [[ "$1" == "secrets" ]]; then
+		shift
+		cmd_secrets "$@"
+		exit $?
 	fi
 
 	# Check Docker is available (skip for help-only commands)

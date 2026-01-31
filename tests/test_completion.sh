@@ -518,6 +518,102 @@ test_logs_tail_suggestions() {
 	log_pass "Logs --tail suggestions working"
 }
 
+# Test: secrets subcommand completion
+test_secrets_subcommands() {
+	log_test "Testing 'devbox secrets' subcommand completion"
+	((TESTS_RUN++))
+
+	COMP_WORDS=("devbox" "secrets" "")
+	COMP_CWORD=2
+	COMP_LINE="devbox secrets "
+	COMP_POINT=${#COMP_LINE}
+
+	COMPREPLY=()
+	_devbox_completion
+
+	# Check for expected subcommands
+	local expected_cmds=("add" "remove" "list" "path" "--help" "-h")
+	for cmd in "${expected_cmds[@]}"; do
+		local found=false
+		for reply in "${COMPREPLY[@]}"; do
+			if [[ "$reply" == "$cmd" ]]; then
+				found=true
+				break
+			fi
+		done
+		if [[ "$found" == false ]]; then
+			log_fail "Subcommand '$cmd' not found in secrets completions"
+			return 1
+		fi
+	done
+
+	log_pass "Secrets subcommand completion working"
+}
+
+# Test: secrets add flags
+test_secrets_add_flags() {
+	log_test "Testing 'devbox secrets add' flag completion"
+	((TESTS_RUN++))
+
+	COMP_WORDS=("devbox" "secrets" "add" "-")
+	COMP_CWORD=3
+	COMP_LINE="devbox secrets add -"
+	COMP_POINT=${#COMP_LINE}
+
+	COMPREPLY=()
+	_devbox_completion
+
+	# Check for expected flags
+	local expected_flags=("--from-env" "--from-file" "--force" "-f" "--help" "-h")
+	for flag in "${expected_flags[@]}"; do
+		local found=false
+		for reply in "${COMPREPLY[@]}"; do
+			if [[ "$reply" == "$flag" ]]; then
+				found=true
+				break
+			fi
+		done
+		if [[ "$found" == false ]]; then
+			log_fail "Flag '$flag' not found in secrets add completions"
+			return 1
+		fi
+	done
+
+	log_pass "Secrets add flags completion working"
+}
+
+# Test: secrets remove flags
+test_secrets_remove_flags() {
+	log_test "Testing 'devbox secrets remove' flag completion"
+	((TESTS_RUN++))
+
+	COMP_WORDS=("devbox" "secrets" "remove" "-")
+	COMP_CWORD=3
+	COMP_LINE="devbox secrets remove -"
+	COMP_POINT=${#COMP_LINE}
+
+	COMPREPLY=()
+	_devbox_completion
+
+	# Check for expected flags
+	local expected_flags=("--force" "-f" "--help" "-h")
+	for flag in "${expected_flags[@]}"; do
+		local found=false
+		for reply in "${COMPREPLY[@]}"; do
+			if [[ "$reply" == "$flag" ]]; then
+				found=true
+				break
+			fi
+		done
+		if [[ "$found" == false ]]; then
+			log_fail "Flag '$flag' not found in secrets remove completions"
+			return 1
+		fi
+	done
+
+	log_pass "Secrets remove flags completion working"
+}
+
 # Run all tests
 main() {
 	echo "========================================"
@@ -540,6 +636,9 @@ main() {
 	test_start_flags || true
 	test_ports_flags || true
 	test_logs_tail_suggestions || true
+	test_secrets_subcommands || true
+	test_secrets_add_flags || true
+	test_secrets_remove_flags || true
 
 	# Summary
 	echo

@@ -19,7 +19,7 @@ _devbox_completion() {
 	_init_completion || return
 
 	# Top-level commands
-	local commands="init create list attach stop start rm logs exec ports help"
+	local commands="init create list attach stop start rm logs exec ports secrets help"
 
 	# Get the command (first non-option argument)
 	local command=""
@@ -165,6 +165,54 @@ _devbox_completion() {
 		else
 			# Complete container names
 			COMPREPLY=($(compgen -W "$(_devbox_containers)" -- "$cur"))
+		fi
+		;;
+
+	secrets)
+		# Get secrets subcommand
+		local secrets_subcmd=""
+		for ((i = 2; i < cword; i++)); do
+			if [[ "${words[i]}" != -* ]]; then
+				secrets_subcmd="${words[i]}"
+				break
+			fi
+		done
+
+		if [[ -z "$secrets_subcmd" ]]; then
+			# Complete subcommands
+			local secrets_cmds="add remove list path --help -h"
+			COMPREPLY=($(compgen -W "$secrets_cmds" -- "$cur"))
+		else
+			case "$secrets_subcmd" in
+			add)
+				if [[ "$cur" == -* ]]; then
+					local add_opts="--from-env --from-file --force -f --help -h"
+					COMPREPLY=($(compgen -W "$add_opts" -- "$cur"))
+				elif [[ "$prev" == "--from-file" ]]; then
+					# Complete file paths
+					COMPREPLY=($(compgen -f -- "$cur"))
+				fi
+				;;
+			remove | rm)
+				if [[ "$cur" == -* ]]; then
+					local remove_opts="--force -f --help -h"
+					COMPREPLY=($(compgen -W "$remove_opts" -- "$cur"))
+				else
+					# Complete secret names from secrets list
+					local secrets_list
+					secrets_list=$(devbox secrets list 2>/dev/null | tail -n +4 | awk '{print $1}' 2>/dev/null)
+					COMPREPLY=($(compgen -W "$secrets_list" -- "$cur"))
+				fi
+				;;
+			list | ls)
+				local list_opts="--help -h"
+				COMPREPLY=($(compgen -W "$list_opts" -- "$cur"))
+				;;
+			path)
+				local path_opts="--help -h"
+				COMPREPLY=($(compgen -W "$path_opts" -- "$cur"))
+				;;
+			esac
 		fi
 		;;
 

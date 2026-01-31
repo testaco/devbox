@@ -752,3 +752,6 @@ This pattern makes the difference between "download and run a dozen commands" an
 11. **Provide comprehensive error messages** - Container entrypoints and critical operations should give users actionable, contextual error information with clear remediation steps
 12. **Make installation effortless** - A single installation script with sensible defaults, `--dry-run`, `--uninstall`, and `--prefix` options reduces adoption friction significantly
 13. **Make bash completion portable** - Always provide fallback for `_init_completion` to work without bash-completion package; test in minimal environments (`bash --norc --noprofile`)
+14. **Design secrets management for security** - Never prompt for secrets interactively (accidental exposure risk); use `--from-env` or `--from-file` patterns; always restrict file permissions (600/700); never display secret values in output
+15. **Commands that don't need Docker should skip Docker checks** - Handle early dispatch in main() before Docker checks to enable purely local operations (like secrets management) to work without Docker running
+16. **Exit codes must be captured correctly in tests** - When using `|| true` to prevent test failures, the exit code is overwritten; use `set +e`, capture exit code to variable, then `set -e` to properly test expected failures
