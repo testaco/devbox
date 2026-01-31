@@ -231,6 +231,52 @@
 
 ---
 
+## Phase 5: Security
+
+### Secrets Management
+Replace environment variable approach (GITHUB_TOKEN) with a proper secrets system.
+
+#### `devbox secrets add <name>`
+- [ ] Prompt for secret value (hidden input, no echo)
+- [ ] Store secret encrypted at rest in `~/.devbox/secrets/`
+- [ ] Use file permissions (600) to restrict access
+- [ ] Support `--from-env <VAR>` to read from environment variable
+- [ ] Support `--from-file <path>` to read from file
+- [ ] Validate secret name (alphanumeric, underscores, hyphens only)
+- [ ] Overwrite existing secret with confirmation prompt
+
+#### `devbox secrets remove <name>`
+- [ ] Remove secret from storage
+- [ ] Confirmation prompt before removal
+- [ ] Support `--force` to skip confirmation
+- [ ] Error if secret doesn't exist
+
+#### `devbox secrets list`
+- [ ] List all stored secret names (never show values)
+- [ ] Show creation/modification timestamps
+- [ ] Indicate which secrets are in use by containers
+
+#### Container Integration
+- [ ] Add `--secret <name>` flag to `devbox create`
+- [ ] On container start, inject secret into container securely
+- [ ] Use secret for `gh auth login --with-token` inside container
+- [ ] Secret passed via stdin to avoid command-line exposure
+- [ ] Secret not stored in container environment or labels
+- [ ] Support multiple `--secret` flags for different credentials
+
+#### Storage Implementation
+- [ ] Create `~/.devbox/secrets/` directory with 700 permissions
+- [ ] Store each secret as individual file with 600 permissions
+- [ ] Use simple encryption (GPG or age) if available, otherwise rely on file permissions
+- [ ] Add `devbox secrets path` command to show secrets directory location
+
+#### Migration
+- [ ] Deprecation warning when GITHUB_TOKEN env var is detected
+- [ ] `devbox secrets import-env` to migrate from env vars to secrets
+- [ ] Update documentation to recommend secrets over env vars
+
+---
+
 ## Known Risks / To Validate
 
 - [ ] **Nix in Docker**: Test Determinate installer actually works in container
