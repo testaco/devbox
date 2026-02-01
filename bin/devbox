@@ -11,6 +11,11 @@ readonly CONTAINER_PREFIX="devbox-"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Source progress indicator library
+if [[ -f "$PROJECT_ROOT/lib/progress.sh" ]]; then
+	source "$PROJECT_ROOT/lib/progress.sh"
+fi
+
 # Secrets directory (can be overridden via environment for testing)
 DEVBOX_SECRETS_DIR="${DEVBOX_SECRETS_DIR:-$HOME/.devbox/secrets}"
 
@@ -50,12 +55,21 @@ check_docker() {
 # Build the base image if it doesn't exist
 ensure_image() {
 	if ! docker image inspect "$DEVBOX_IMAGE" >/dev/null 2>&1; then
-		log_info "Building devbox base image..."
-		if ! docker build -t "$DEVBOX_IMAGE" "$PROJECT_ROOT/docker"; then
-			log_error "Failed to build devbox base image"
-			exit 1
+		# Use spinner if available, otherwise fallback
+		if declare -f with_spinner >/dev/null 2>&1; then
+			if ! with_spinner "Building devbox base image (this may take a few minutes on first run)" \
+				"docker build -q -t '$DEVBOX_IMAGE' '$PROJECT_ROOT/docker'"; then
+				log_error "Failed to build devbox base image"
+				exit 1
+			fi
+		else
+			log_info "Building devbox base image..."
+			if ! docker build -t "$DEVBOX_IMAGE" "$PROJECT_ROOT/docker"; then
+				log_error "Failed to build devbox base image"
+				exit 1
+			fi
+			log_success "Base image built successfully"
 		fi
-		log_success "Base image built successfully"
 	fi
 }
 
@@ -287,12 +301,21 @@ EOF
 			return 0
 		fi
 	else
-		log_info "Creating credential volume '$DEVBOX_VOLUME'..."
-		if ! docker volume create "$DEVBOX_VOLUME" >/dev/null 2>&1; then
-			log_error "Failed to create credential volume"
-			return 1
+		# Use spinner if available
+		if declare -f with_spinner >/dev/null 2>&1; then
+			if ! with_spinner "Creating credential volume '$DEVBOX_VOLUME'" \
+				"docker volume create '$DEVBOX_VOLUME'"; then
+				log_error "Failed to create credential volume"
+				return 1
+			fi
+		else
+			log_info "Creating credential volume '$DEVBOX_VOLUME'..."
+			if ! docker volume create "$DEVBOX_VOLUME" >/dev/null 2>&1; then
+				log_error "Failed to create credential volume"
+				return 1
+			fi
+			log_success "Credential volume created successfully"
 		fi
-		log_success "Credential volume created successfully"
 	fi
 
 	# Prepare environment variables for the init container
@@ -322,13 +345,18 @@ EOF
 	log_info "Starting authentication container..."
 
 	# First fix volume permissions, then run init script
-	log_info "Setting up volume permissions..."
-	docker run --rm \
-		--user root \
-		--entrypoint '' \
-		-v "$DEVBOX_VOLUME:/devbox-credentials" \
-		"$DEVBOX_IMAGE" \
-		chown devbox:devbox /devbox-credentials
+	if declare -f with_spinner >/dev/null 2>&1; then
+		with_spinner "Setting up volume permissions" \
+			"docker run --rm --user root --entrypoint '' -v '$DEVBOX_VOLUME:/devbox-credentials' '$DEVBOX_IMAGE' chown devbox:devbox /devbox-credentials"
+	else
+		log_info "Setting up volume permissions..."
+		docker run --rm \
+			--user root \
+			--entrypoint '' \
+			-v "$DEVBOX_VOLUME:/devbox-credentials" \
+			"$DEVBOX_IMAGE" \
+			chown devbox:devbox /devbox-credentials
+	fi
 
 	# Copy Claude credentials as root if they exist (to handle permission issues)
 	if [[ -f "$HOME/.claude/.credentials.json" ]] || [[ -f "$HOME/.claude/settings.json" ]]; then
@@ -751,7 +779,6 @@ EOF
 		return 0
 	fi
 
-	log_info "Creating container '$container_name'..."
 	log_info "Repository: $repo_url"
 	log_info "Mode: $auth_mode"
 
@@ -763,17 +790,21 @@ EOF
 	fi
 
 	# Fix workspace volume permissions (similar to credentials volume fix in cmd_init)
-	log_info "Setting up workspace volume permissions..."
-	docker run --rm \
-		--user root \
-		--entrypoint '' \
-		-v "${full_container_name}-workspace:/workspace" \
-		"$DEVBOX_IMAGE" \
-		chown devbox:devbox /workspace
+	if declare -f with_spinner >/dev/null 2>&1; then
+		with_spinner "Setting up workspace volume" \
+			"docker run --rm --user root --entrypoint '' -v '${full_container_name}-workspace:/workspace' '$DEVBOX_IMAGE' chown devbox:devbox /workspace"
+	else
+		log_info "Setting up workspace volume permissions..."
+		docker run --rm \
+			--user root \
+			--entrypoint '' \
+			-v "${full_container_name}-workspace:/workspace" \
+			"$DEVBOX_IMAGE" \
+			chown devbox:devbox /workspace
+	fi
 
 	# Populate secrets volume if using secure secret injection
 	if [[ "$use_secrets_volume" == true ]] && [[ -n "$secrets_volume" ]]; then
-		log_info "Setting up secrets volume..."
 		# Create volume and populate with secrets using correct ownership (devbox user)
 		# We pipe secrets via stdin to avoid exposing them in process arguments
 		local secrets_script=""
@@ -787,18 +818,35 @@ EOF
 		done
 		secrets_script="${secrets_script}chown -R devbox:devbox /run/secrets"
 
-		docker run --rm \
-			--user root \
-			--entrypoint '' \
-			-v "${secrets_volume}:/run/secrets" \
-			"$DEVBOX_IMAGE" \
-			bash -c "$secrets_script"
+		if declare -f with_spinner >/dev/null 2>&1; then
+			with_spinner "Setting up secrets volume" \
+				"docker run --rm --user root --entrypoint '' -v '${secrets_volume}:/run/secrets' '$DEVBOX_IMAGE' bash -c \"$secrets_script\""
+		else
+			log_info "Setting up secrets volume..."
+			docker run --rm \
+				--user root \
+				--entrypoint '' \
+				-v "${secrets_volume}:/run/secrets" \
+				"$DEVBOX_IMAGE" \
+				bash -c "$secrets_script"
+		fi
 	fi
 
 	# Create and start the container
+	if declare -f start_spinner >/dev/null 2>&1; then
+		start_spinner "Creating container '$container_name'"
+	else
+		log_info "Creating container '$container_name'..."
+	fi
+
 	if eval "$docker_cmd" >/dev/null 2>&1; then
 		local container_id
 		container_id=$(docker ps -q --filter "name=^${full_container_name}$")
+
+		if declare -f stop_spinner >/dev/null 2>&1; then
+			stop_spinner 0
+		fi
+
 		log_success "Container '$container_name' created successfully"
 		echo "  Container ID: ${container_id:0:12}"
 		echo "  Repository: $repo_url"
@@ -806,6 +854,9 @@ EOF
 		echo
 		log_info "Attach to container with: devbox attach $container_name"
 	else
+		if declare -f stop_spinner >/dev/null 2>&1; then
+			stop_spinner 1
+		fi
 		log_error "Failed to create container"
 		return 1
 	fi

@@ -22,6 +22,7 @@ BASH_FILES=(
     "install.sh"
     "docker/entrypoint.sh"
     "docker/init-credentials.sh"
+    "lib/"*.sh
     "tests/"*.sh
     "completions/devbox.bash"
 )
