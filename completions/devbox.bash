@@ -51,12 +51,12 @@ _devbox_completion() {
 
 	create)
 		# Check if we need container name, repo URL, or options
-		local create_opts="--port -p --bedrock --aws-profile --help -h"
+		local create_opts="--port -p --secret --bedrock --aws-profile --help -h"
 
 		# Count non-option arguments after 'create'
 		local arg_count=0
 		for ((i = 2; i < cword; i++)); do
-			if [[ "${words[i]}" != -* ]] && [[ "${words[i - 1]}" != --port ]] && [[ "${words[i - 1]}" != -p ]] && [[ "${words[i - 1]}" != --aws-profile ]]; then
+			if [[ "${words[i]}" != -* ]] && [[ "${words[i - 1]}" != --port ]] && [[ "${words[i - 1]}" != -p ]] && [[ "${words[i - 1]}" != --aws-profile ]] && [[ "${words[i - 1]}" != --secret ]]; then
 				((arg_count++))
 			fi
 		done
@@ -67,6 +67,15 @@ _devbox_completion() {
 			return 0
 		elif [[ "$prev" == "--aws-profile" ]]; then
 			# Could read from ~/.aws/config but leave empty for now
+			return 0
+		elif [[ "$prev" == "--secret" ]]; then
+			# Complete secret names from secrets list
+			local secrets_dir="${DEVBOX_SECRETS_DIR:-$HOME/.devbox/secrets}"
+			if [[ -d "$secrets_dir" ]]; then
+				local secrets_list
+				secrets_list=$(ls -1 "$secrets_dir" 2>/dev/null)
+				COMPREPLY=($(compgen -W "$secrets_list" -- "$cur"))
+			fi
 			return 0
 		else
 			# Suggest flags

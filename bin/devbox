@@ -100,7 +100,7 @@ USAGE:
 
 COMMANDS:
     init                    One-time setup: authenticate Claude Code and AWS
-    create <name> <repo>    Create and start a new container instance (requires GITHUB_TOKEN)
+    create <name> <repo>    Create and start a new container instance
     list                    List all devbox containers with status
     attach <name|id>        Attach to a running container's shell
     stop <name|id>          Stop a container (keeps state)
@@ -118,6 +118,7 @@ INIT OPTIONS:
 
 CREATE OPTIONS:
     --port, -p <host:container>  Port mapping (repeatable)
+    --secret <name>        Use stored secret for GITHUB_TOKEN
     --bedrock              Use AWS Bedrock for Claude (sets CLAUDE_CODE_USE_BEDROCK=1)
     --aws-profile <profile>  AWS profile name
 
@@ -137,13 +138,15 @@ EXAMPLES:
     # First-time setup (Bedrock mode)
     devbox init --bedrock --import-aws
 
-    # Create container with GitHub token
+    # Store GitHub token as secret (one-time)
     export GITHUB_TOKEN="github_pat_xxx..."
-    devbox create myapp org/repo --port 3000:3000
+    devbox secrets add github-token --from-env GITHUB_TOKEN
+
+    # Create container using stored secret
+    devbox create myapp org/repo --secret github-token --port 3000:3000
 
     # Create container for Bedrock
-    export GITHUB_TOKEN="github_pat_xxx..."
-    devbox create myapp org/repo --bedrock --aws-profile prod
+    devbox create myapp org/repo --secret github-token --bedrock --aws-profile prod
 
     # List containers
     devbox list
@@ -365,6 +368,7 @@ cmd_create() {
 	local bedrock_mode=false
 	local aws_profile=""
 	local dry_run=false
+	local secret_name=""
 
 	# Parse arguments and flags
 	while [[ $# -gt 0 ]]; do
@@ -375,6 +379,14 @@ cmd_create() {
 				return 1
 			fi
 			ports+=("$2")
+			shift 2
+			;;
+		--secret)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires an argument"
+				return 1
+			fi
+			secret_name="$2"
 			shift 2
 			;;
 		--bedrock)
@@ -406,12 +418,13 @@ ARGUMENTS:
 
 OPTIONS:
     --port, -p <host:container>  Port mapping (repeatable)
+    --secret <name>        Use stored secret for GITHUB_TOKEN (from devbox secrets)
     --bedrock              Use AWS Bedrock for Claude (sets CLAUDE_CODE_USE_BEDROCK=1)
     --aws-profile <profile>  AWS profile name
     --help, -h             Show this help message
 
 ENVIRONMENT:
-    GITHUB_TOKEN            Required - GitHub personal access token for repo access
+    GITHUB_TOKEN            GitHub personal access token (alternative to --secret)
                            Create at: GitHub → Settings → Developer settings → Tokens
 
 DESCRIPTION:
@@ -419,23 +432,27 @@ DESCRIPTION:
     and ready for development. The container runs in detached mode with a
     persistent shell session.
 
-    GitHub authentication uses GITHUB_TOKEN environment variable (no OAuth).
-    Create a fine-grained token with:
-      - Repository access: Only select repositories
-      - Permissions: Contents: Read (or Read and Write for pushing)
+    GitHub authentication can be provided via:
+      1. --secret <name>: Read token from stored secret (recommended)
+      2. GITHUB_TOKEN environment variable
+
+    To store a token as a secret:
+      export GITHUB_TOKEN="github_pat_xxx..."
+      devbox secrets add github-token --from-env GITHUB_TOKEN
 
 EXAMPLES:
-    # Set GitHub token first
-    export GITHUB_TOKEN="github_pat_xxx..."
+    # Using stored secret (recommended)
+    devbox create myapp org/repo --secret github-token
 
-    # Basic container
+    # Using environment variable
+    export GITHUB_TOKEN="github_pat_xxx..."
     devbox create myapp org/repo
 
     # With port mapping
-    devbox create webapp org/webapp --port 3000:3000
+    devbox create webapp org/webapp --secret github-token --port 3000:3000
 
     # Bedrock mode with AWS profile
-    devbox create myapp org/repo --bedrock --aws-profile prod
+    devbox create myapp org/repo --secret github-token --bedrock --aws-profile prod
 
 EOF
 			return 0
@@ -471,19 +488,50 @@ EOF
 		return 1
 	fi
 
-	# Check for GITHUB_TOKEN
-	if [[ -z "${GITHUB_TOKEN:-}" ]]; then
-		log_error "GITHUB_TOKEN environment variable required"
+	# Get GitHub token from secret or environment
+	local github_token=""
+	if [[ -n "$secret_name" ]]; then
+		# Read token from stored secret
+		local secret_path
+		secret_path=$(get_secret_path "$secret_name")
+		if [[ ! -f "$secret_path" ]]; then
+			log_error "Secret '$secret_name' not found"
+			echo ""
+			echo "Available secrets:"
+			if [[ -d "$DEVBOX_SECRETS_DIR" ]] && [[ -n "$(ls -A "$DEVBOX_SECRETS_DIR" 2>/dev/null)" ]]; then
+				for f in "$DEVBOX_SECRETS_DIR"/*; do
+					echo "  - $(basename "$f")"
+				done
+			else
+				echo "  (none)"
+			fi
+			echo ""
+			echo "Add a secret with:"
+			echo "  export GITHUB_TOKEN=\"github_pat_xxx...\""
+			echo "  devbox secrets add github-token --from-env GITHUB_TOKEN"
+			echo ""
+			return 1
+		fi
+		github_token=$(cat "$secret_path")
+		if [[ -z "$github_token" ]]; then
+			log_error "Secret '$secret_name' is empty"
+			return 1
+		fi
+	elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+		github_token="$GITHUB_TOKEN"
+	else
+		log_error "GitHub token required: use --secret <name> or set GITHUB_TOKEN"
+		echo ""
+		echo "Option 1 - Use a stored secret (recommended):"
+		echo "  devbox secrets add github-token --from-env GITHUB_TOKEN"
+		echo "  devbox create $container_name $repo_url --secret github-token"
+		echo ""
+		echo "Option 2 - Use environment variable:"
+		echo "  export GITHUB_TOKEN=\"github_pat_xxx...\""
+		echo "  devbox create $container_name $repo_url"
 		echo ""
 		echo "Create a fine-grained GitHub token at:"
 		echo "  GitHub → Settings → Developer settings → Fine-grained tokens"
-		echo ""
-		echo "Required permissions:"
-		echo "  • Repository access: Only select repositories"
-		echo "  • Permissions: Contents: Read (or Read and Write)"
-		echo ""
-		echo "Then export it:"
-		echo "  export GITHUB_TOKEN=\"github_pat_xxx...\""
 		echo ""
 		return 1
 	fi
@@ -507,7 +555,7 @@ EOF
 	# Prepare environment variables
 	local env_vars=""
 	env_vars="$env_vars -e DEVBOX_REPO=$repo_url"
-	env_vars="$env_vars -e GITHUB_TOKEN=$GITHUB_TOKEN"
+	env_vars="$env_vars -e GITHUB_TOKEN=$github_token"
 
 	# Configure authentication mode
 	local auth_mode="oauth"
@@ -601,6 +649,11 @@ EOF
 		echo "Would create container '$container_name' with:"
 		echo "  Repository: $repo_url"
 		echo "  Mode: $auth_mode"
+		if [[ -n "$secret_name" ]]; then
+			echo "  GitHub token: from secret '$secret_name'"
+		else
+			echo "  GitHub token: from environment"
+		fi
 		if [[ -n "$aws_profile" ]]; then
 			echo "  AWS Profile: $aws_profile"
 		fi
@@ -610,7 +663,9 @@ EOF
 		if [[ "$bedrock_mode" == true ]]; then
 			echo "  Environment: CLAUDE_CODE_USE_BEDROCK=1"
 		fi
-		echo "  Docker command: $docker_cmd"
+		# Mask the token in the docker command output
+		local masked_cmd="${docker_cmd//$github_token/***MASKED***}"
+		echo "  Docker command: $masked_cmd"
 		return 0
 	fi
 
