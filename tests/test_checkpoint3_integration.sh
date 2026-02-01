@@ -4,14 +4,16 @@ set -euo pipefail
 # =============================================================================
 # Checkpoint 3 Integration Test
 # =============================================================================
-# This test validates the complete devbox workflow:
+# This test validates the complete devbox workflow using SECRETS (not env vars):
 #   1. Initialize devbox (build image, set up credentials)
-#   2. Create a container instance with GitHub token secret
-#   3. Attach to container and wait for nix develop to be ready
-#   4. Run test suite inside container (.githooks/pre-commit, git fetch, docker ps, claude)
-#   5. Exit cleanly
+#   2. Verify GitHub token secret is available
+#   3. Create container instance using --secret flag (secure file injection)
+#   4. Attach to container and wait for nix develop to be ready
+#   5. Run test suite inside container (.githooks/pre-commit, git fetch, docker ps, claude)
+#   6. Exit cleanly
 #
-# IMPORTANT: This test runs REAL Docker commands - no dry-run or fallback modes.
+# IMPORTANT: This test uses secure secret injection via Docker volumes.
+# The GITHUB_TOKEN env var is only used to SEED the secret store, not passed to containers.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -113,7 +115,7 @@ check_prerequisites() {
 	fi
 	log_success "devbox CLI found"
 
-	# Check for GitHub token - either from existing secret or environment
+	# Check for GitHub token secret
 	local secret_path
 	secret_path=$("$DEVBOX_CLI" secrets path)/"$SECRET_NAME"
 
@@ -121,16 +123,21 @@ check_prerequisites() {
 		log_success "Secret '$SECRET_NAME' already exists"
 		SECRET_EXISTS=true
 	elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
-		log_success "GITHUB_TOKEN is set (will create secret)"
-		SECRET_EXISTS=false
+		# GITHUB_TOKEN env var exists - import it as a secret immediately
+		log_info "Importing GITHUB_TOKEN as secret '$SECRET_NAME'..."
+		"$DEVBOX_CLI" secrets add "$SECRET_NAME" --from-env GITHUB_TOKEN
+		SECRET_CREATED=true
+		SECRET_EXISTS=true
+		log_success "Secret '$SECRET_NAME' created from GITHUB_TOKEN"
 	else
 		log_error "No GitHub token available"
 		echo ""
-		echo "Either set GITHUB_TOKEN environment variable:"
+		echo "Create the secret first:"
 		echo "  export GITHUB_TOKEN=\"ghp_xxxxxxxxxxxxx\""
-		echo ""
-		echo "Or create the secret manually:"
 		echo "  devbox secrets add $SECRET_NAME --from-env GITHUB_TOKEN"
+		echo ""
+		echo "Or run this test with GITHUB_TOKEN set:"
+		echo "  GITHUB_TOKEN=\"ghp_xxx\" ./tests/test_checkpoint3_integration.sh"
 		echo ""
 		exit 1
 	fi
@@ -152,23 +159,18 @@ step_init() {
 	fi
 }
 
-# Step 2: Store GitHub token as secret
-step_store_secret() {
-	log_step "Step 2: Store GitHub Token as Secret"
+# Step 2: Verify secret is ready
+step_verify_secret() {
+	log_step "Step 2: Verify GitHub Token Secret"
 
-	# If secret already exists, skip this step
-	if [[ "$SECRET_EXISTS" == true ]]; then
-		log_info "Using existing secret '$SECRET_NAME'"
-		log_success "Secret ready"
-		return 0
+	# Secret should already exist at this point (created in check_prerequisites)
+	if [[ "$SECRET_EXISTS" != true ]]; then
+		log_error "Secret '$SECRET_NAME' not available - this should not happen"
+		exit 1
 	fi
 
-	# Create secret from GITHUB_TOKEN environment variable
-	log_info "Adding secret '$SECRET_NAME' from GITHUB_TOKEN environment variable"
-	"$DEVBOX_CLI" secrets add "$SECRET_NAME" --from-env GITHUB_TOKEN
-
-	SECRET_CREATED=true
-	log_success "Secret '$SECRET_NAME' stored successfully"
+	log_info "Using secret '$SECRET_NAME' for GitHub authentication"
+	log_success "Secret ready (secure file-based injection)"
 }
 
 # Step 3: Create container instance
@@ -347,10 +349,10 @@ main() {
 	echo "  CHECKPOINT 3 INTEGRATION TEST"
 	echo "============================================================================="
 	echo ""
-	echo "This test validates the complete devbox workflow:"
+	echo "This test validates the complete devbox workflow using SECRETS:"
 	echo "  1. Initialize devbox (build image, set up credentials)"
-	echo "  2. Store GitHub token as secret"
-	echo "  3. Create container instance for $TEST_REPO"
+	echo "  2. Verify GitHub token secret (secure file-based storage)"
+	echo "  3. Create container using --secret flag for $TEST_REPO"
 	echo "  4. Attach to container, wait for nix develop"
 	echo "  5. Run test suite (pre-commit, git fetch, docker ps, claude)"
 	echo "  6. Exit cleanly"
@@ -358,7 +360,7 @@ main() {
 
 	check_prerequisites
 	step_init
-	step_store_secret
+	step_verify_secret
 	step_create_container
 	step_attach_and_run_tests
 	step_verify_exit

@@ -160,8 +160,9 @@ with_spinner() {
 _progress_cleanup() {
 	if [[ -n "$SPINNER_PID" ]]; then
 		kill "$SPINNER_PID" 2>/dev/null || true
+		# Only restore cursor if we actually had a spinner running
+		tput cnorm 2>/dev/null || true
 	fi
-	tput cnorm 2>/dev/null || true
 }
 
 # Set up cleanup trap
