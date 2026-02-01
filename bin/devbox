@@ -388,7 +388,7 @@ cmd_create() {
 	local bedrock_mode=false
 	local aws_profile=""
 	local dry_run=false
-	local secret_name=""
+	local secrets=()
 
 	# Parse arguments and flags
 	while [[ $# -gt 0 ]]; do
@@ -406,7 +406,7 @@ cmd_create() {
 				log_error "Option $1 requires an argument"
 				return 1
 			fi
-			secret_name="$2"
+			secrets+=("$2")
 			shift 2
 			;;
 		--bedrock)
@@ -438,7 +438,8 @@ ARGUMENTS:
 
 OPTIONS:
     --port, -p <host:container>  Port mapping (repeatable)
-    --secret <name>        Use stored secret for GITHUB_TOKEN (from devbox secrets)
+    --secret <name>        Secret to inject (repeatable, mounted to /run/secrets/<name>)
+                           First secret named 'github-token' is used for GitHub auth
     --bedrock              Use AWS Bedrock for Claude (sets CLAUDE_CODE_USE_BEDROCK=1)
     --aws-profile <profile>  AWS profile name
     --help, -h             Show this help message
@@ -453,20 +454,22 @@ DESCRIPTION:
     persistent shell session.
 
     GitHub authentication can be provided via:
-      1. --secret <name>: Read token from stored secret (recommended)
+      1. --secret github-token: Read token from stored secret (recommended, secure)
       2. GITHUB_TOKEN environment variable
+
+    Secrets are securely injected via file mounts to /run/secrets/<name>,
+    not exposed as environment variables. The container reads them from files.
 
     To store a token as a secret:
       export GITHUB_TOKEN="github_pat_xxx..."
       devbox secrets add github-token --from-env GITHUB_TOKEN
 
 EXAMPLES:
-    # Using stored secret (recommended)
+    # Using stored secret (recommended - secure file injection)
     devbox create myapp org/repo --secret github-token
 
-    # Using environment variable
-    export GITHUB_TOKEN="github_pat_xxx..."
-    devbox create myapp org/repo
+    # Multiple secrets
+    devbox create myapp org/repo --secret github-token --secret npm-token
 
     # With port mapping
     devbox create webapp org/webapp --secret github-token --port 3000:3000
@@ -508,45 +511,83 @@ EOF
 		return 1
 	fi
 
-	# Get GitHub token from secret or environment
+	# Validate and prepare secrets
+	local secrets_volume=""
 	local github_token=""
-	if [[ -n "$secret_name" ]]; then
-		# Read token from stored secret
-		local secret_path
-		secret_path=$(get_secret_path "$secret_name")
-		if [[ ! -f "$secret_path" ]]; then
-			log_error "Secret '$secret_name' not found"
-			echo ""
-			echo "Available secrets:"
-			if [[ -d "$DEVBOX_SECRETS_DIR" ]] && [[ -n "$(ls -A "$DEVBOX_SECRETS_DIR" 2>/dev/null)" ]]; then
-				for f in "$DEVBOX_SECRETS_DIR"/*; do
-					echo "  - $(basename "$f")"
-				done
-			else
-				echo "  (none)"
+	local use_secrets_volume=false
+	local secret_values=()
+	local secret_targets=()
+
+	if [[ ${#secrets[@]} -gt 0 ]]; then
+		use_secrets_volume=true
+		secrets_volume="${CONTAINER_PREFIX}${container_name}-secrets"
+
+		# Validate each secret and collect values
+		for secret_name in "${secrets[@]}"; do
+			local secret_path
+			secret_path=$(get_secret_path "$secret_name")
+			if [[ ! -f "$secret_path" ]]; then
+				log_error "Secret '$secret_name' not found"
+				echo ""
+				echo "Available secrets:"
+				if [[ -d "$DEVBOX_SECRETS_DIR" ]] && [[ -n "$(ls -A "$DEVBOX_SECRETS_DIR" 2>/dev/null)" ]]; then
+					for f in "$DEVBOX_SECRETS_DIR"/*; do
+						echo "  - $(basename "$f")"
+					done
+				else
+					echo "  (none)"
+				fi
+				echo ""
+				echo "Add a secret with:"
+				echo "  devbox secrets add $secret_name --from-env YOUR_VAR"
+				echo ""
+				return 1
 			fi
-			echo ""
-			echo "Add a secret with:"
-			echo "  export GITHUB_TOKEN=\"github_pat_xxx...\""
-			echo "  devbox secrets add github-token --from-env GITHUB_TOKEN"
-			echo ""
-			return 1
-		fi
-		github_token=$(cat "$secret_path")
+
+			local secret_value
+			secret_value=$(cat "$secret_path")
+			if [[ -z "$secret_value" ]]; then
+				log_error "Secret '$secret_name' is empty"
+				return 1
+			fi
+
+			# Map secret names to standard file names for container
+			# github-token -> github_token (for entrypoint compatibility)
+			local target_name="${secret_name//-/_}"
+
+			# If this secret contains "github" in the name, also write it as github_token
+			if [[ "$secret_name" == *github* ]] || [[ "$secret_name" == *GITHUB* ]]; then
+				secret_values+=("$secret_value")
+				secret_targets+=("github_token")
+				github_token="from-secrets-volume"
+			fi
+
+			# Also store under the original name (normalized with underscores)
+			secret_values+=("$secret_value")
+			secret_targets+=("$target_name")
+		done
+
+		# Require a github token for repo cloning
 		if [[ -z "$github_token" ]]; then
-			log_error "Secret '$secret_name' is empty"
+			log_error "A GitHub token secret is required for repository cloning"
+			echo ""
+			echo "Provide a secret containing 'github' in the name:"
+			echo "  devbox create $container_name $repo_url --secret github-token"
+			echo "  devbox create $container_name $repo_url --secret my-github-token"
+			echo ""
 			return 1
 		fi
 	elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+		# Fallback to environment variable (less secure)
 		github_token="$GITHUB_TOKEN"
 	else
-		log_error "GitHub token required: use --secret <name> or set GITHUB_TOKEN"
+		log_error "GitHub token required: use --secret github-token or set GITHUB_TOKEN"
 		echo ""
-		echo "Option 1 - Use a stored secret (recommended):"
+		echo "Option 1 - Use a stored secret (recommended - secure):"
 		echo "  devbox secrets add github-token --from-env GITHUB_TOKEN"
 		echo "  devbox create $container_name $repo_url --secret github-token"
 		echo ""
-		echo "Option 2 - Use environment variable:"
+		echo "Option 2 - Use environment variable (less secure):"
 		echo "  export GITHUB_TOKEN=\"github_pat_xxx...\""
 		echo "  devbox create $container_name $repo_url"
 		echo ""
@@ -575,7 +616,11 @@ EOF
 	# Prepare environment variables
 	local env_vars=""
 	env_vars="$env_vars -e DEVBOX_REPO=$repo_url"
-	env_vars="$env_vars -e GITHUB_TOKEN=$github_token"
+
+	# Only pass GITHUB_TOKEN via env var if NOT using secrets mount (less secure fallback)
+	if [[ "$use_secrets_volume" != true ]]; then
+		env_vars="$env_vars -e GITHUB_TOKEN=$github_token"
+	fi
 
 	# Configure authentication mode
 	local auth_mode="oauth"
@@ -640,6 +685,11 @@ EOF
 	docker_cmd="$docker_cmd -v ${DEVBOX_VOLUME}:/devbox-credentials:ro"
 	docker_cmd="$docker_cmd -v ${full_container_name}-workspace:/workspace"
 
+	# Mount secrets volume if using secure secret injection
+	if [[ "$use_secrets_volume" == true ]] && [[ -n "$secrets_volume" ]]; then
+		docker_cmd="$docker_cmd -v ${secrets_volume}:/run/secrets:ro"
+	fi
+
 	# Mount Docker socket if available
 	if [ -n "$docker_socket" ]; then
 		docker_cmd="$docker_cmd -v ${docker_socket}:/var/run/docker.sock"
@@ -669,8 +719,11 @@ EOF
 		echo "Would create container '$container_name' with:"
 		echo "  Repository: $repo_url"
 		echo "  Mode: $auth_mode"
-		if [[ -n "$secret_name" ]]; then
-			echo "  GitHub token: from secret '$secret_name'"
+		if [[ ${#secrets[@]} -gt 0 ]]; then
+			echo "  Secrets (mounted to /run/secrets):"
+			for secret_name in "${secrets[@]}"; do
+				echo "    - $secret_name"
+			done
 		else
 			echo "  GitHub token: from environment"
 		fi
@@ -683,9 +736,8 @@ EOF
 		if [[ "$bedrock_mode" == true ]]; then
 			echo "  Environment: CLAUDE_CODE_USE_BEDROCK=1"
 		fi
-		# Mask the token in the docker command output
-		local masked_cmd="${docker_cmd//$github_token/***MASKED***}"
-		echo "  Docker command: $masked_cmd"
+		# Show docker command (secrets paths are fine to show, values are in files)
+		echo "  Docker command: $docker_cmd"
 		return 0
 	fi
 
@@ -708,6 +760,30 @@ EOF
 		-v "${full_container_name}-workspace:/workspace" \
 		"$DEVBOX_IMAGE" \
 		chown devbox:devbox /workspace
+
+	# Populate secrets volume if using secure secret injection
+	if [[ "$use_secrets_volume" == true ]] && [[ -n "$secrets_volume" ]]; then
+		log_info "Setting up secrets volume..."
+		# Create volume and populate with secrets using correct ownership (devbox user)
+		# We pipe secrets via stdin to avoid exposing them in process arguments
+		local secrets_script=""
+		for i in "${!secret_targets[@]}"; do
+			local target="${secret_targets[$i]}"
+			local value="${secret_values[$i]}"
+			# Use base64 to safely pass values that might contain special chars
+			local encoded
+			encoded=$(echo -n "$value" | base64 -w0)
+			secrets_script="${secrets_script}echo '$encoded' | base64 -d > /run/secrets/$target && chmod 600 /run/secrets/$target; "
+		done
+		secrets_script="${secrets_script}chown -R devbox:devbox /run/secrets"
+
+		docker run --rm \
+			--user root \
+			--entrypoint '' \
+			-v "${secrets_volume}:/run/secrets" \
+			"$DEVBOX_IMAGE" \
+			bash -c "$secrets_script"
+	fi
 
 	# Create and start the container
 	if eval "$docker_cmd" >/dev/null 2>&1; then
@@ -1318,8 +1394,9 @@ EOF
 		local failed_count=0
 		local success_count=0
 		while IFS= read -r container_id; do
-			local display_name container_status workspace_volume
-			display_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///' || echo "unknown")
+			local full_container_name display_name container_status workspace_volume
+			full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///' || echo "unknown")
+			display_name="$full_container_name"
 			if [[ "$display_name" == devbox-test-* ]]; then
 				display_name="${display_name#devbox-test-}"
 			elif [[ "$display_name" == devbox-* ]]; then
@@ -1354,6 +1431,12 @@ EOF
 					else
 						log_warning "Failed to remove workspace volume for '$display_name'"
 					fi
+				fi
+
+				# Remove secrets volume if it exists
+				local secrets_volume="${full_container_name}-secrets"
+				if docker volume rm "$secrets_volume" >/dev/null 2>&1; then
+					log_info "Secrets volume removed for '$display_name'"
 				fi
 			else
 				log_error "Failed to remove container '$display_name'"
@@ -1433,6 +1516,10 @@ EOF
 			log_info "Forcibly stopping and removing running container"
 		fi
 
+		# Get full container name before removal (for secrets cleanup)
+		local full_container_name
+		full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///' || echo "")
+
 		if docker rm $rm_args "$container_id" >/dev/null 2>&1; then
 			log_success "Container '$display_name' removed successfully"
 
@@ -1443,6 +1530,14 @@ EOF
 					log_success "Workspace volume removed successfully"
 				else
 					log_warning "Failed to remove workspace volume '$workspace_volume'"
+				fi
+			fi
+
+			# Remove secrets volume if it exists
+			if [[ -n "$full_container_name" ]]; then
+				local secrets_volume="${full_container_name}-secrets"
+				if docker volume rm "$secrets_volume" >/dev/null 2>&1; then
+					log_info "Secrets volume removed"
 				fi
 			fi
 		else

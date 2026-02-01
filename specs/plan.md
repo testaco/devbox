@@ -259,12 +259,15 @@ Replace environment variable approach (GITHUB_TOKEN) with a proper secrets syste
 - [ ] Indicate which secrets are in use by containers (future enhancement)
 
 #### Container Integration
-- [ ] Add `--secret <name>` flag to `devbox create`
-- [ ] On container start, inject secret into container securely
-- [ ] Use secret for `gh auth login --with-token` inside container
-- [ ] Secret passed via stdin to avoid command-line exposure
-- [ ] Secret not stored in container environment or labels
-- [ ] Support multiple `--secret` flags for different credentials
+- [x] Add `--secret <name>` flag to `devbox create`
+- [x] On container start, inject secret into container securely
+- [x] Use secret for GitHub auth inside container (via GITHUB_TOKEN env read from /run/secrets)
+- [x] Secret passed via file mount to /run/secrets (not command-line)
+- [x] Secret not stored in container environment or labels when using --secret
+- [x] Support multiple `--secret` flags for different credentials
+- [x] Runtime secrets stored in ~/.devbox/runtime-secrets/<container>/ with proper permissions
+- [x] Runtime secrets cleaned up when container is removed
+- [x] Comprehensive test suite (6 new tests for secure secret injection)
 
 #### Storage Implementation
 - [x] Create `~/.devbox/secrets/` directory with 700 permissions

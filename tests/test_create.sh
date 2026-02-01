@@ -258,6 +258,238 @@ test_create_complex_command() {
 	fi
 }
 
+# ============================================================================
+# Secure Secret Injection Tests
+# ============================================================================
+
+# Setup temporary secrets directory for testing
+setup_test_secrets() {
+	TEST_SECRETS_DIR=$(mktemp -d)
+	export DEVBOX_SECRETS_DIR="$TEST_SECRETS_DIR"
+	mkdir -p "$TEST_SECRETS_DIR"
+	chmod 700 "$TEST_SECRETS_DIR"
+}
+
+# Cleanup test secrets
+cleanup_test_secrets() {
+	if [[ -n "${TEST_SECRETS_DIR:-}" ]] && [[ -d "$TEST_SECRETS_DIR" ]]; then
+		rm -rf "$TEST_SECRETS_DIR"
+	fi
+}
+
+test_create_with_secret_flag() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# Setup test secrets directory
+	setup_test_secrets
+
+	# Create a test secret
+	echo "test_github_token_12345" >"$TEST_SECRETS_DIR/github-token"
+	chmod 600 "$TEST_SECRETS_DIR/github-token"
+
+	# Unset GITHUB_TOKEN to force using the secret
+	local saved_token="${GITHUB_TOKEN:-}"
+	unset GITHUB_TOKEN
+
+	if output=$("$DEVBOX_CLI" create test-secret "$TEST_REPO" --secret github-token --dry-run 2>&1); then
+		if [[ "$output" == *"Would create container"* ]] &&
+			[[ "$output" == *"Secrets (mounted to /run/secrets)"* ]] &&
+			[[ "$output" == *"github-token"* ]]; then
+			log_test "create --secret flag shows secret in dry-run"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create --secret flag missing expected content"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create --secret flag failed in dry-run mode"
+		echo "Output was: $output"
+	fi
+
+	# Restore environment
+	if [[ -n "$saved_token" ]]; then
+		export GITHUB_TOKEN="$saved_token"
+	fi
+	cleanup_test_secrets
+}
+
+test_create_secret_not_in_env_vars() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# Setup test secrets directory
+	setup_test_secrets
+
+	# Create a test secret with a unique value we can search for
+	local secret_value="SUPER_SECRET_TOKEN_SHOULD_NOT_APPEAR"
+	echo "$secret_value" >"$TEST_SECRETS_DIR/github-token"
+	chmod 600 "$TEST_SECRETS_DIR/github-token"
+
+	# Unset GITHUB_TOKEN to force using the secret
+	local saved_token="${GITHUB_TOKEN:-}"
+	unset GITHUB_TOKEN
+
+	if output=$("$DEVBOX_CLI" create test-secret-secure "$TEST_REPO" --secret github-token --dry-run 2>&1); then
+		# The docker command should NOT contain GITHUB_TOKEN as env var
+		# It should use volume mount to /run/secrets instead
+		# Check that there's no "-e GITHUB_TOKEN=" pattern (even masked)
+		if [[ "$output" == *"-e GITHUB_TOKEN="* ]]; then
+			log_fail "Secret should NOT be passed via -e GITHUB_TOKEN environment variable"
+			echo "SECURITY ISSUE: Secret passed as environment variable (visible in docker inspect)"
+			echo "Output was: $output"
+		elif [[ "$output" == *"/run/secrets"* ]]; then
+			log_test "create --secret uses secure file mount instead of environment variable"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "Expected /run/secrets volume mount for secure secret handling"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create --secret failed in dry-run mode"
+		echo "Output was: $output"
+	fi
+
+	# Restore environment
+	if [[ -n "$saved_token" ]]; then
+		export GITHUB_TOKEN="$saved_token"
+	fi
+	cleanup_test_secrets
+}
+
+test_create_multiple_secrets() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# Setup test secrets directory
+	setup_test_secrets
+
+	# Create multiple test secrets
+	echo "github_token_value" >"$TEST_SECRETS_DIR/github-token"
+	echo "npm_token_value" >"$TEST_SECRETS_DIR/npm-token"
+	echo "custom_api_key" >"$TEST_SECRETS_DIR/api-key"
+	chmod 600 "$TEST_SECRETS_DIR/github-token"
+	chmod 600 "$TEST_SECRETS_DIR/npm-token"
+	chmod 600 "$TEST_SECRETS_DIR/api-key"
+
+	# Unset GITHUB_TOKEN to force using secrets
+	local saved_token="${GITHUB_TOKEN:-}"
+	unset GITHUB_TOKEN
+
+	if output=$("$DEVBOX_CLI" create test-multi-secret "$TEST_REPO" \
+		--secret github-token \
+		--secret npm-token \
+		--secret api-key \
+		--dry-run 2>&1); then
+		# Should mention all secrets
+		if [[ "$output" == *"github-token"* ]] &&
+			[[ "$output" == *"npm-token"* ]] &&
+			[[ "$output" == *"api-key"* ]]; then
+			log_test "create with multiple --secret flags shows all secrets"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create with multiple secrets missing some secret references"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create with multiple secrets failed in dry-run mode"
+		echo "Output was: $output"
+	fi
+
+	# Restore environment
+	if [[ -n "$saved_token" ]]; then
+		export GITHUB_TOKEN="$saved_token"
+	fi
+	cleanup_test_secrets
+}
+
+test_create_secret_not_found() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output exit_code
+
+	# Setup empty test secrets directory
+	setup_test_secrets
+
+	# Unset GITHUB_TOKEN to force using secrets
+	local saved_token="${GITHUB_TOKEN:-}"
+	unset GITHUB_TOKEN
+
+	set +e
+	output=$("$DEVBOX_CLI" create test-nosecret "$TEST_REPO" --secret nonexistent-secret --dry-run 2>&1)
+	exit_code=$?
+	set -e
+
+	if [[ $exit_code -ne 0 ]] && [[ "$output" == *"not found"* ]]; then
+		log_test "create --secret with nonexistent secret shows appropriate error"
+		TESTS_PASSED=$((TESTS_PASSED + 1))
+	else
+		log_fail "create --secret should fail when secret doesn't exist"
+		echo "Output was: $output"
+		echo "Exit code was: $exit_code"
+	fi
+
+	# Restore environment
+	if [[ -n "$saved_token" ]]; then
+		export GITHUB_TOKEN="$saved_token"
+	fi
+	cleanup_test_secrets
+}
+
+test_create_secret_mount_path() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# Setup test secrets directory
+	setup_test_secrets
+
+	# Create a test secret
+	echo "test_token" >"$TEST_SECRETS_DIR/github-token"
+	chmod 600 "$TEST_SECRETS_DIR/github-token"
+
+	# Unset GITHUB_TOKEN to force using secrets
+	local saved_token="${GITHUB_TOKEN:-}"
+	unset GITHUB_TOKEN
+
+	if output=$("$DEVBOX_CLI" create test-mount "$TEST_REPO" --secret github-token --dry-run 2>&1); then
+		# Docker command should include volume mount for secrets
+		if [[ "$output" == *"/run/secrets"* ]]; then
+			log_test "create --secret mounts secrets to /run/secrets"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create --secret should mount secrets to /run/secrets"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create --secret failed in dry-run mode"
+		echo "Output was: $output"
+	fi
+
+	# Restore environment
+	if [[ -n "$saved_token" ]]; then
+		export GITHUB_TOKEN="$saved_token"
+	fi
+	cleanup_test_secrets
+}
+
+test_create_help_shows_multiple_secrets() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	if output=$("$DEVBOX_CLI" create --help 2>&1); then
+		# Help text should indicate --secret is repeatable
+		if [[ "$output" == *"--secret"* ]] &&
+			[[ "$output" == *"repeatable"* || "$output" == *"multiple"* ]]; then
+			log_test "create --help documents multiple --secret support"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create --help should document that --secret is repeatable"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create --help failed"
+	fi
+}
+
 # Main test execution
 main() {
 	echo "Running devbox create command tests..."
@@ -289,6 +521,14 @@ main() {
 	test_create_bedrock_mode
 	test_create_name_already_exists
 	test_create_complex_command
+
+	# Secure secret injection tests
+	test_create_with_secret_flag
+	test_create_secret_not_in_env_vars
+	test_create_multiple_secrets
+	test_create_secret_not_found
+	test_create_secret_mount_path
+	test_create_help_shows_multiple_secrets
 
 	# Results
 	echo
