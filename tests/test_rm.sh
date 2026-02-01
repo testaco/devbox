@@ -169,8 +169,8 @@ test_remove_stopped_container() {
 	container=$(create_test_container "rm-stopped-test" "stopped")
 	volume_name="${container}-workspace"
 
-	# Remove the container
-	if output=$("$DEVBOX_BIN" rm rm-stopped-test 2>&1); then
+	# Remove the container (pipe 'y' to confirm)
+	if output=$(echo "y" | "$DEVBOX_BIN" rm rm-stopped-test 2>&1); then
 		# Verify container is removed
 		if docker inspect "$container" >/dev/null 2>&1; then
 			log_fail "Container still exists after removal"
@@ -265,8 +265,8 @@ test_container_id_resolution() {
 	short_id="${container_id:0:12}"
 	volume_name="${container}-workspace"
 
-	# Remove using short ID
-	if output=$("$DEVBOX_BIN" rm "$short_id" 2>&1); then
+	# Remove using short ID (pipe 'y' to confirm)
+	if output=$(echo "y" | "$DEVBOX_BIN" rm "$short_id" 2>&1); then
 		# Verify container is removed
 		if docker inspect "$container" >/dev/null 2>&1; then
 			log_fail "Container still exists after ID removal"
@@ -362,6 +362,105 @@ test_force_dry_run() {
 	fi
 }
 
+# Test 11: Confirmation prompt for single container removal (denied)
+test_confirm_prompt_denied() {
+	log_test "Testing confirmation prompt when user declines removal"
+	((TESTS_RUN++))
+
+	# Create stopped test container
+	container=$(create_test_container "rm-confirm-deny-test" "stopped")
+
+	# Pipe 'n' (no) to stdin to deny confirmation
+	output=$(echo "n" | "$DEVBOX_BIN" rm rm-confirm-deny-test 2>&1) || true
+
+	if [[ "$output" == *"Operation cancelled"* ]]; then
+		# Verify container still exists (was NOT removed)
+		if docker inspect "$container" >/dev/null 2>&1; then
+			log_pass "Confirmation prompt properly cancelled removal"
+		else
+			log_fail "Container was removed despite cancellation"
+			return 1
+		fi
+	else
+		log_fail "Expected 'Operation cancelled' message. Got: $output"
+		return 1
+	fi
+}
+
+# Test 12: Confirmation prompt for single container removal (confirmed)
+test_confirm_prompt_confirmed() {
+	log_test "Testing confirmation prompt when user confirms removal"
+	((TESTS_RUN++))
+
+	# Create stopped test container
+	container=$(create_test_container "rm-confirm-yes-test" "stopped")
+	volume_name="${container}-workspace"
+
+	# Pipe 'y' (yes) to stdin to confirm removal
+	if output=$(echo "y" | "$DEVBOX_BIN" rm rm-confirm-yes-test 2>&1); then
+		# Verify container is removed
+		if docker inspect "$container" >/dev/null 2>&1; then
+			log_fail "Container still exists after confirmed removal"
+			return 1
+		else
+			log_pass "Confirmation prompt properly allowed removal"
+			# Remove from TEST_CONTAINERS and TEST_VOLUMES since they're now gone
+			TEST_CONTAINERS=(${TEST_CONTAINERS[@]/$container/})
+			TEST_VOLUMES=(${TEST_VOLUMES[@]/$volume_name/})
+		fi
+	else
+		log_fail "Remove command failed after confirmation. Output: $output"
+		return 1
+	fi
+}
+
+# Test 13: Force flag skips confirmation prompt
+test_force_skips_confirmation() {
+	log_test "Testing that --force flag skips confirmation prompt"
+	((TESTS_RUN++))
+
+	# Create stopped test container
+	container=$(create_test_container "rm-force-skip-test" "stopped")
+	volume_name="${container}-workspace"
+
+	# Use --force which should skip the prompt entirely (no stdin needed)
+	if output=$("$DEVBOX_BIN" rm --force rm-force-skip-test 2>&1); then
+		# Verify container is removed
+		if docker inspect "$container" >/dev/null 2>&1; then
+			log_fail "Container still exists after force removal"
+			return 1
+		else
+			log_pass "Force flag properly skipped confirmation"
+			# Remove from TEST_CONTAINERS and TEST_VOLUMES since they're now gone
+			TEST_CONTAINERS=(${TEST_CONTAINERS[@]/$container/})
+			TEST_VOLUMES=(${TEST_VOLUMES[@]/$volume_name/})
+		fi
+	else
+		log_fail "Force remove command failed. Output: $output"
+		return 1
+	fi
+}
+
+# Test 14: Confirmation prompt shows container info
+test_confirm_prompt_shows_info() {
+	log_test "Testing confirmation prompt displays container information"
+	((TESTS_RUN++))
+
+	# Create stopped test container
+	container=$(create_test_container "rm-confirm-info-test" "stopped")
+
+	# Pipe 'n' to cancel and capture output
+	output=$(echo "n" | "$DEVBOX_BIN" rm rm-confirm-info-test 2>&1) || true
+
+	# Check that prompt shows container name and warning
+	if [[ "$output" == *"rm-confirm-info-test"* ]] && [[ "$output" == *"irreversible"* ]]; then
+		log_pass "Confirmation prompt shows container info"
+	else
+		log_fail "Confirmation prompt missing container info. Got: $output"
+		return 1
+	fi
+}
+
 # Main test runner
 main() {
 	echo "Running devbox rm command tests..."
@@ -384,6 +483,10 @@ main() {
 	test_dry_run || true
 	test_extra_arguments || true
 	test_force_dry_run || true
+	test_confirm_prompt_denied || true
+	test_confirm_prompt_confirmed || true
+	test_force_skips_confirmation || true
+	test_confirm_prompt_shows_info || true
 
 	# Print summary
 	echo

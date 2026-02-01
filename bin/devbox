@@ -1284,31 +1284,30 @@ ARGUMENTS:
     <name|id>              Container name or ID to remove
 
 OPTIONS:
-    --force                Force remove a running container
-    -f                     Force remove a running container
+    --force, -f            Force remove (skip confirmation, stop running containers)
     -a                     Remove all devbox containers
     -af, -fa               Remove all devbox containers (force)
     --dry-run              Show what would be done without executing
     --help, -h             Show this help message
 
 DESCRIPTION:
-    Permanently removes a container and its workspace. By default, only
-    stopped containers can be removed. Use --force/-f to remove running
-    containers (they will be stopped first). Use -a to remove all
-    devbox containers with confirmation.
+    Permanently removes a container and its workspace. By default, you will
+    be prompted to confirm removal. Use --force/-f to skip confirmation and
+    remove running containers (they will be stopped first). Use -a to remove
+    all devbox containers.
 
 EXAMPLES:
-    # Remove stopped container
+    # Remove stopped container (with confirmation)
     devbox rm myproject
 
-    # Force remove running container
+    # Force remove without confirmation
     devbox rm --force myproject
     devbox rm -f myproject
 
     # Remove all containers (with confirmation)
     devbox rm -a
 
-    # Remove all containers including running ones (with confirmation)
+    # Remove all containers without confirmation
     devbox rm -af
 
     # Remove container by ID
@@ -1316,9 +1315,9 @@ EXAMPLES:
 
 NOTES:
     - This action is irreversible - all data will be lost
+    - Removal requires confirmation unless using --force/-f
     - Running containers must be stopped first unless using --force/-f
     - The workspace volume will be removed along with the container
-    - Using -a will prompt for confirmation before removing all containers
 
 EOF
 			return 0
@@ -1408,7 +1407,7 @@ EOF
 			# Check if container is running and force not set
 			if [[ "$container_status" == "running" ]] && [[ "$force" == false ]]; then
 				log_error "Skipping running container '$display_name' (use -af to force remove)"
-				((failed_count++))
+				((failed_count++)) || true
 				continue
 			fi
 
@@ -1422,7 +1421,7 @@ EOF
 
 			if docker rm $rm_args "$container_id" >/dev/null 2>&1; then
 				log_success "Container '$display_name' removed"
-				((success_count++))
+				((success_count++)) || true
 
 				# Remove workspace volume if it exists
 				if [[ -n "$workspace_volume" ]]; then
@@ -1440,7 +1439,7 @@ EOF
 				fi
 			else
 				log_error "Failed to remove container '$display_name'"
-				((failed_count++))
+				((failed_count++)) || true
 			fi
 		done <<<"$all_containers"
 
@@ -1505,6 +1504,17 @@ EOF
 				echo "Would also run: docker volume rm $workspace_volume"
 			fi
 			return 0
+		fi
+
+		# Confirmation prompt unless --force is used
+		if [[ "$force" == false ]]; then
+			log_warning "This will remove container '$display_name' and its workspace"
+			log_warning "This action is irreversible - all data will be lost!"
+			read -r -p "Type 'y' to confirm removal: " response
+			if [[ "$response" != "y" ]]; then
+				log_info "Operation cancelled"
+				return 0
+			fi
 		fi
 
 		log_info "Removing container '$display_name' (${container_id:0:12})"

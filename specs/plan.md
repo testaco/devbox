@@ -120,7 +120,9 @@
 - [x] Comprehensive help text with examples
 - [x] Full flag parsing (--help, --dry-run, --force)
 - [x] Workspace volume cleanup (removes associated volumes)
-- [x] Complete test suite with 10 comprehensive tests
+- [x] Confirmation prompt before removal (skipped with --force)
+- [x] Fixed `rm -a` loop to remove all containers (arithmetic with `set -e` bug)
+- [x] Complete test suite with 14 comprehensive tests
 
 ---
 
@@ -157,9 +159,9 @@
 - [x] Friendly error if Nix shell entry fails (debugging tips in `entrypoint.sh`)
 
 ### UX Improvements
-- [ ] Colored output (green success, red error, yellow warning)
+- [x] Colored output (green success, red error, yellow warning) - implemented in log_info/log_success/log_warning/log_error functions
 - [ ] Progress indicators for long operations
-- [ ] Confirm prompt for `rm` without `--force`
+- [x] Confirm prompt for `rm` without `--force` - prompts user to type 'y' before removal
 
 ### Shell Completion
 - [x] Create `completions/devbox.bash`
@@ -284,6 +286,34 @@ Replace environment variable approach (GITHUB_TOKEN) with a proper secrets syste
 - [ ] Deprecation warning when GITHUB_TOKEN env var is detected
 - [ ] `devbox secrets import-env` to migrate from env vars to secrets
 - [ ] Update documentation to recommend secrets over env vars
+
+### Docker-in-Docker Isolation
+Replace host Docker socket mounting with an isolated inner daemon for security.
+
+#### Problem
+Mounting `-v /var/run/docker.sock:/var/run/docker.sock` allows containers to access the host Docker daemon, which is a security risk. A container could escape by mounting the host filesystem (`-v /:/host`).
+
+#### Solution: Inner Docker Daemon
+- [ ] Install Docker daemon in Dockerfile
+  ```dockerfile
+  RUN curl -fsSL https://get.docker.com | sh && usermod -aG docker devbox
+  ```
+- [ ] Start inner dockerd in entrypoint (UNIX socket only, not TCP)
+  ```bash
+  dockerd --host=unix:///var/run/docker.sock &
+  # Wait for daemon
+  while ! docker info &>/dev/null; do sleep 1; done
+  ```
+- [ ] Remove host socket mount from `devbox create`
+  - Remove: `-v /var/run/docker.sock:/var/run/docker.sock`
+  - Container uses its own isolated daemon instead
+- [ ] Test docker and docker-compose work inside container
+- [ ] Verify isolation: `-v /:/host` inside container only exposes inner container's filesystem
+
+#### Benefits
+- Docker/docker-compose work inside the container
+- Containers created inside are isolated from host
+- Host filesystem cannot be mounted from within devbox container
 
 ---
 
