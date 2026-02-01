@@ -580,6 +580,16 @@ EOF
 	elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
 		# Fallback to environment variable (less secure)
 		github_token="$GITHUB_TOKEN"
+		# Show deprecation warning
+		log_warning "Using GITHUB_TOKEN environment variable (deprecated)"
+		echo ""
+		echo "  Environment variables are less secure than stored secrets."
+		echo "  The token is visible in 'docker inspect' output."
+		echo ""
+		echo "  Migrate to secure secrets storage:"
+		echo "    devbox secrets import-env GITHUB_TOKEN"
+		echo "    devbox create $container_name $repo_url --secret github-token"
+		echo ""
 	else
 		log_error "GitHub token required: use --secret github-token or set GITHUB_TOKEN"
 		echo ""
@@ -2311,6 +2321,187 @@ EOF
 	done
 }
 
+cmd_secrets_import_env() {
+	local env_var=""
+	local secret_name=""
+	local force=false
+	local dry_run=false
+
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--help | -h)
+			cat <<EOF
+devbox secrets import-env - Import an environment variable as a secret
+
+USAGE:
+    devbox secrets import-env <ENV_VAR> [options]
+
+OPTIONS:
+    --as <name>            Name for the secret (default: lowercase env var name with underscores replaced by hyphens)
+    --force                Overwrite existing secret without prompting
+    --dry-run              Show what would be done without making changes
+    --help, -h             Show this help message
+
+DESCRIPTION:
+    Imports an environment variable's value as a devbox secret. This is the
+    recommended way to migrate from using environment variables directly to
+    using devbox's secure secret storage.
+
+    Secrets stored via this method are more secure because:
+    - They are stored with restricted file permissions (600)
+    - They are mounted into containers via files, not environment variables
+    - They are not visible in 'docker inspect' output
+    - They are never displayed in devbox command output
+
+EXAMPLES:
+    # Import GITHUB_TOKEN as a secret named 'github-token'
+    export GITHUB_TOKEN="ghp_xxx..."
+    devbox secrets import-env GITHUB_TOKEN
+
+    # Import with a custom secret name
+    devbox secrets import-env MY_API_KEY --as api-key
+
+    # Force overwrite an existing secret
+    devbox secrets import-env GITHUB_TOKEN --force
+
+    # Preview what would happen
+    devbox secrets import-env GITHUB_TOKEN --dry-run
+
+MIGRATION:
+    If you've been using GITHUB_TOKEN environment variable directly:
+
+    1. Import it as a secret:
+       devbox secrets import-env GITHUB_TOKEN --as github-token
+
+    2. Use --secret flag when creating containers:
+       devbox create myproject repo-url --secret github-token
+
+    3. Optionally, unset the environment variable:
+       unset GITHUB_TOKEN
+
+EOF
+			return 0
+			;;
+		--as)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option --as requires a secret name"
+				return 1
+			fi
+			secret_name="$2"
+			shift 2
+			;;
+		--force)
+			force=true
+			shift
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			if [[ -z "$env_var" ]]; then
+				env_var="$1"
+			else
+				log_error "Unexpected argument: $1"
+				return 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	# Validate required arguments
+	if [[ -z "$env_var" ]]; then
+		log_error "Environment variable name is required"
+		echo ""
+		echo "Usage: devbox secrets import-env <ENV_VAR> [--as <name>]"
+		echo ""
+		echo "Examples:"
+		echo "  devbox secrets import-env GITHUB_TOKEN"
+		echo "  devbox secrets import-env MY_API_KEY --as api-key"
+		return 1
+	fi
+
+	# Check if the environment variable is set
+	if [[ -z "${!env_var:-}" ]]; then
+		log_error "Environment variable '$env_var' is not set or is empty"
+		echo ""
+		echo "Make sure the variable is exported:"
+		echo "  export $env_var=\"your-value\""
+		return 1
+	fi
+
+	# Determine secret name (default: lowercase with hyphens)
+	if [[ -z "$secret_name" ]]; then
+		secret_name=$(echo "$env_var" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+	fi
+
+	# Validate secret name
+	if ! [[ "$secret_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+		log_error "Invalid secret name: $secret_name"
+		log_error "Secret names can only contain letters, numbers, hyphens, and underscores"
+		return 1
+	fi
+
+	# Check if secret already exists
+	local secret_path="$DEVBOX_SECRETS_DIR/$secret_name"
+	if [[ -f "$secret_path" ]] && [[ "$force" != true ]]; then
+		log_error "Secret '$secret_name' already exists"
+		echo ""
+		echo "Use --force to overwrite:"
+		echo "  devbox secrets import-env $env_var --as $secret_name --force"
+		return 1
+	fi
+
+	# Dry run mode
+	if [[ "$dry_run" == true ]]; then
+		log_info "[Dry run] Would import environment variable:"
+		echo "  Source: $env_var"
+		echo "  Secret name: $secret_name"
+		echo "  Storage path: $secret_path"
+		if [[ -f "$secret_path" ]]; then
+			echo "  Note: Would overwrite existing secret"
+		fi
+		return 0
+	fi
+
+	# Ensure secrets directory exists
+	ensure_secrets_dir
+
+	# Write the secret value to file with restricted permissions
+	local value="${!env_var}"
+	(
+		umask 077
+		printf '%s' "$value" >"$secret_path"
+	)
+	chmod 600 "$secret_path"
+
+	# Show success message with security recommendation
+	if [[ "$env_var" == "GITHUB_TOKEN" ]]; then
+		log_success "Imported $env_var as secret '$secret_name'"
+		echo ""
+		log_info "Security recommendation:"
+		echo "  Using --secret is more secure than environment variables because"
+		echo "  the token is mounted as a file and not visible in 'docker inspect'."
+		echo ""
+		echo "  Use the secret when creating containers:"
+		echo "    devbox create <name> <repo> --secret $secret_name"
+		echo ""
+		echo "  You can now safely unset the environment variable:"
+		echo "    unset GITHUB_TOKEN"
+	else
+		log_success "Imported $env_var as secret '$secret_name'"
+		echo ""
+		echo "Use the secret when creating containers:"
+		echo "  devbox create <name> <repo> --secret $secret_name"
+	fi
+}
+
 cmd_secrets_path() {
 	# Parse arguments and flags
 	while [[ $# -gt 0 ]]; do
@@ -2363,6 +2554,7 @@ SUBCOMMANDS:
     remove <name>          Remove a secret from storage
     list                   List all stored secrets
     path                   Show the secrets storage directory
+    import-env <VAR>       Import an environment variable as a secret
 
 OPTIONS:
     --help, -h             Show this help message
@@ -2375,6 +2567,9 @@ EXAMPLES:
     # Add a secret from environment variable
     export GITHUB_TOKEN="ghp_xxx..."
     devbox secrets add github-token --from-env GITHUB_TOKEN
+
+    # Import an environment variable as a secret (recommended migration)
+    devbox secrets import-env GITHUB_TOKEN
 
     # List all secrets
     devbox secrets list
@@ -2411,6 +2606,9 @@ EOF
 		;;
 	path)
 		cmd_secrets_path "$@"
+		;;
+	import-env)
+		cmd_secrets_import_env "$@"
 		;;
 	*)
 		log_error "Unknown secrets subcommand: $subcommand"

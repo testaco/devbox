@@ -532,7 +532,7 @@ test_secrets_subcommands() {
 	_devbox_completion
 
 	# Check for expected subcommands
-	local expected_cmds=("add" "remove" "list" "path" "--help" "-h")
+	local expected_cmds=("add" "remove" "list" "path" "import-env" "--help" "-h")
 	for cmd in "${expected_cmds[@]}"; do
 		local found=false
 		for reply in "${COMPREPLY[@]}"; do
@@ -614,6 +614,38 @@ test_secrets_remove_flags() {
 	log_pass "Secrets remove flags completion working"
 }
 
+# Test: secrets import-env flags
+test_secrets_import_env_flags() {
+	log_test "Testing 'devbox secrets import-env' flag completion"
+	((TESTS_RUN++))
+
+	COMP_WORDS=("devbox" "secrets" "import-env" "-")
+	COMP_CWORD=3
+	COMP_LINE="devbox secrets import-env -"
+	COMP_POINT=${#COMP_LINE}
+
+	COMPREPLY=()
+	_devbox_completion
+
+	# Check for expected flags
+	local expected_flags=("--as" "--force" "--dry-run" "--help" "-h")
+	for flag in "${expected_flags[@]}"; do
+		local found=false
+		for reply in "${COMPREPLY[@]}"; do
+			if [[ "$reply" == "$flag" ]]; then
+				found=true
+				break
+			fi
+		done
+		if [[ "$found" == false ]]; then
+			log_fail "Flag '$flag' not found in secrets import-env completions"
+			return 1
+		fi
+	done
+
+	log_pass "Secrets import-env flags completion working"
+}
+
 # Run all tests
 main() {
 	echo "========================================"
@@ -639,6 +671,7 @@ main() {
 	test_secrets_subcommands || true
 	test_secrets_add_flags || true
 	test_secrets_remove_flags || true
+	test_secrets_import_env_flags || true
 
 	# Summary
 	echo

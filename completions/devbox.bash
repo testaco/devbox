@@ -189,7 +189,7 @@ _devbox_completion() {
 
 		if [[ -z "$secrets_subcmd" ]]; then
 			# Complete subcommands
-			local secrets_cmds="add remove list path --help -h"
+			local secrets_cmds="add remove list path import-env --help -h"
 			COMPREPLY=($(compgen -W "$secrets_cmds" -- "$cur"))
 		else
 			case "$secrets_subcmd" in
@@ -220,6 +220,13 @@ _devbox_completion() {
 			path)
 				local path_opts="--help -h"
 				COMPREPLY=($(compgen -W "$path_opts" -- "$cur"))
+				;;
+			import-env)
+				if [[ "$cur" == -* ]]; then
+					local import_opts="--as --force --dry-run --help -h"
+					COMPREPLY=($(compgen -W "$import_opts" -- "$cur"))
+				fi
+				# Don't complete env var names - user should type them
 				;;
 			esac
 		fi

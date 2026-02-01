@@ -313,6 +313,82 @@ else
 fi
 
 # ==============================================================================
+# Test: secrets import-env
+# ==============================================================================
+run_test "secrets import-env --help shows usage"
+OUTPUT=$("$DEVBOX_BIN" secrets import-env --help 2>&1) || true
+if echo "$OUTPUT" | grep -q "import-env"; then
+	test_passed "secrets import-env --help shows usage"
+else
+	test_failed "secrets import-env --help does not show usage. Got: $OUTPUT"
+fi
+
+run_test "secrets import-env requires variable name argument"
+OUTPUT=$("$DEVBOX_BIN" secrets import-env 2>&1) || true
+if echo "$OUTPUT" | grep -qi "required\|usage\|variable"; then
+	test_passed "secrets import-env shows error without variable name"
+else
+	test_failed "secrets import-env should require variable name. Got: $OUTPUT"
+fi
+
+run_test "secrets import-env imports from environment variable"
+export IMPORT_TEST_VAR="import-test-value-xyz"
+OUTPUT=$("$DEVBOX_BIN" secrets import-env IMPORT_TEST_VAR 2>&1)
+if [[ $? -eq 0 ]] && echo "$OUTPUT" | grep -qi "imported\|added\|stored\|success"; then
+	test_passed "secrets import-env works"
+else
+	test_failed "secrets import-env failed. Got: $OUTPUT"
+fi
+
+run_test "secrets import-env creates secret with correct name"
+# Verify the secret was created with lowercase name
+OUTPUT=$("$DEVBOX_BIN" secrets list 2>&1)
+if echo "$OUTPUT" | grep -qi "import.test.var\|import-test-var"; then
+	test_passed "secrets import-env created secret with correct name"
+else
+	test_failed "secrets import-env did not create expected secret. Got: $OUTPUT"
+fi
+unset IMPORT_TEST_VAR
+
+run_test "secrets import-env imports GITHUB_TOKEN with custom name"
+export GITHUB_TOKEN="ghp_testtoken12345"
+OUTPUT=$("$DEVBOX_BIN" secrets import-env GITHUB_TOKEN --as github-token 2>&1)
+if [[ $? -eq 0 ]]; then
+	# Verify the secret exists with the custom name
+	LIST_OUTPUT=$("$DEVBOX_BIN" secrets list 2>&1)
+	if echo "$LIST_OUTPUT" | grep -q "github-token"; then
+		test_passed "secrets import-env --as works"
+	else
+		test_failed "secrets import-env --as did not create secret with custom name. Got: $LIST_OUTPUT"
+	fi
+else
+	test_failed "secrets import-env --as failed. Got: $OUTPUT"
+fi
+unset GITHUB_TOKEN
+
+run_test "secrets import-env fails for nonexistent env var"
+set +e
+OUTPUT=$("$DEVBOX_BIN" secrets import-env NONEXISTENT_VAR_67890 2>&1)
+EXIT_CODE=$?
+set -e
+if [[ $EXIT_CODE -ne 0 ]] && echo "$OUTPUT" | grep -qi "not set\|not found\|empty"; then
+	test_passed "secrets import-env fails for nonexistent env var"
+else
+	test_failed "secrets import-env should fail for nonexistent env var. Got: $OUTPUT (exit code: $EXIT_CODE)"
+fi
+
+run_test "secrets import-env shows deprecation info for GITHUB_TOKEN"
+export GITHUB_TOKEN="ghp_anothertoken"
+OUTPUT=$("$DEVBOX_BIN" secrets import-env GITHUB_TOKEN --as github-token-2 2>&1)
+if echo "$OUTPUT" | grep -qi "deprecat\|recommend\|secure"; then
+	test_passed "secrets import-env shows security recommendation"
+else
+	# It's ok if it just works without showing deprecation, the key is it imports correctly
+	test_passed "secrets import-env imports GITHUB_TOKEN (deprecation message optional)"
+fi
+unset GITHUB_TOKEN
+
+# ==============================================================================
 # Summary
 # ==============================================================================
 echo

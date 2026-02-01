@@ -283,8 +283,8 @@ Replace environment variable approach (GITHUB_TOKEN) with a proper secrets syste
 - [x] Added secret name completion for remove command
 
 #### Migration
-- [ ] Deprecation warning when GITHUB_TOKEN env var is detected
-- [ ] `devbox secrets import-env` to migrate from env vars to secrets
+- [x] Deprecation warning when GITHUB_TOKEN env var is detected
+- [x] `devbox secrets import-env` to migrate from env vars to secrets
 - [ ] Update documentation to recommend secrets over env vars
 
 ### Docker-in-Docker Isolation
