@@ -16,7 +16,7 @@
 - [x] Create `docker/entrypoint.sh`
 - [x] Read `DEVBOX_REPO_URL` env var
 - [x] Clone repo to `/workspace` if not present
-- [x] Check for `flake.nix` or `shell.nix`, exit with error if missing
+- [x] Check for `flake.nix` or `shell.nix`, fall back to basic bash if missing
 - [x] Enter Nix shell (`nix develop` or `nix-shell`)
 - [x] Ensure shell stays open for attach (exec bash)
 

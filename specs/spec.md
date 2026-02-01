@@ -389,13 +389,18 @@ Future enhancement: configuration file to define containers that auto-start on h
 
 ## Nix Integration
 
-### Requirements
+### Configuration (Optional)
 
-Repositories must contain either:
+Repositories can optionally contain a Nix configuration for project-specific tools:
 - `flake.nix` (preferred)
 - `shell.nix` (legacy)
 
-If neither exists, the container exits with an error message.
+**Behavior:**
+- If `flake.nix` exists → enters `nix develop` with project-specific tools
+- If `shell.nix` exists → enters `nix-shell` with project-specific tools
+- If neither exists → drops into basic bash shell with devbox base tools (git, gh, claude)
+
+This makes devbox accessible to projects that don't use Nix while still providing full Nix integration for those that do.
 
 ### Flake Example
 

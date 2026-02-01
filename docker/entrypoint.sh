@@ -181,34 +181,28 @@ fi
 cd "$REPO_DIR"
 
 # ============================================================================
-# Step 7: Verify Nix configuration exists
+# Step 7: Enter development environment
 # ============================================================================
-
-if [ ! -f "flake.nix" ] && [ ! -f "shell.nix" ]; then
-	echo ""
-	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	echo "✗ ERROR: No Nix configuration found"
-	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	echo ""
-	echo "Repository: $REPO"
-	echo "Expected: flake.nix or shell.nix"
-	echo ""
-	echo "To add a flake.nix, you can use the devbox template:"
-	echo "  nix flake init -t github:system1/devbox"
-	echo ""
-	echo "Or see: https://nixos.org/manual/nix/stable/command-ref/new-cli/nix3-flake.html"
-	echo ""
-	exit 1
-fi
-
-# ============================================================================
-# Step 8: Enter Nix development environment
-# ============================================================================
-
-echo "Entering Nix development environment..."
 
 if [ -f "flake.nix" ]; then
+	echo "Found flake.nix - entering Nix development environment..."
 	exec nix develop
-else
+elif [ -f "shell.nix" ]; then
+	echo "Found shell.nix - entering Nix development environment..."
 	exec nix-shell
+else
+	echo ""
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo "ℹ️  No Nix configuration found (flake.nix or shell.nix)"
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo ""
+	echo "Using base devbox environment with:"
+	echo "  • git, gh (GitHub CLI)"
+	echo "  • claude (if configured)"
+	echo "  • Standard shell tools"
+	echo ""
+	echo "To add project-specific tools, create a flake.nix:"
+	echo "  nix flake init -t github:system1/devbox?dir=base-flake"
+	echo ""
+	exec bash
 fi
