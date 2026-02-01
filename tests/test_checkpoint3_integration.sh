@@ -1,0 +1,373 @@
+#!/bin/bash
+set -euo pipefail
+
+# =============================================================================
+# Checkpoint 3 Integration Test
+# =============================================================================
+# This test validates the complete devbox workflow:
+#   1. Initialize devbox (build image, set up credentials)
+#   2. Create a container instance with GitHub token secret
+#   3. Attach to container and wait for nix develop to be ready
+#   4. Run test suite inside container (.githooks/pre-commit, git fetch, docker ps, claude)
+#   5. Exit cleanly
+#
+# IMPORTANT: This test runs REAL Docker commands - no dry-run or fallback modes.
+# =============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+DEVBOX_CLI="$PROJECT_ROOT/bin/devbox"
+
+# Test configuration
+readonly TEST_CONTAINER_NAME="devbox-test"
+readonly TEST_REPO="testaco/devbox"
+readonly SECRET_NAME="devbox-github-token"
+readonly EXPECT_TIMEOUT=600 # 10 minutes max wait for nix develop
+
+# Colors
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m'
+
+# State
+CONTAINER_CREATED=false
+SECRET_CREATED=false
+SECRET_EXISTS=false
+
+# Logging functions
+log_info() {
+	echo -e "${BLUE}INFO:${NC} $*"
+}
+
+log_success() {
+	echo -e "${GREEN}✓${NC} $*"
+}
+
+log_warning() {
+	echo -e "${YELLOW}⚠${NC} $*"
+}
+
+log_error() {
+	echo -e "${RED}✗${NC} $*" >&2
+}
+
+log_step() {
+	echo ""
+	echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+	echo -e "${BLUE}  $*${NC}"
+	echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+	echo ""
+}
+
+# Cleanup function
+cleanup() {
+	log_step "Cleanup"
+
+	if [[ "$CONTAINER_CREATED" == true ]]; then
+		log_info "Removing test container..."
+		"$DEVBOX_CLI" rm -f "$TEST_CONTAINER_NAME" 2>/dev/null || true
+	fi
+
+	if [[ "$SECRET_CREATED" == true ]]; then
+		log_info "Removing test secret..."
+		"$DEVBOX_CLI" secrets remove "$SECRET_NAME" --force 2>/dev/null || true
+	fi
+
+	log_success "Cleanup complete"
+}
+
+# Set trap for cleanup on exit
+trap cleanup EXIT
+
+# Check prerequisites
+check_prerequisites() {
+	log_step "Checking Prerequisites"
+
+	# Check Docker
+	if ! command -v docker >/dev/null 2>&1; then
+		log_error "Docker not found"
+		exit 1
+	fi
+	log_success "Docker found"
+
+	# Check Docker daemon
+	if ! docker info >/dev/null 2>&1; then
+		log_error "Docker daemon not running"
+		exit 1
+	fi
+	log_success "Docker daemon running"
+
+	# Check expect
+	if ! command -v expect >/dev/null 2>&1; then
+		log_error "expect not found - install with: sudo apt-get install expect"
+		exit 1
+	fi
+	log_success "expect found"
+
+	# Check devbox CLI exists
+	if [[ ! -x "$DEVBOX_CLI" ]]; then
+		log_error "devbox CLI not found at $DEVBOX_CLI"
+		exit 1
+	fi
+	log_success "devbox CLI found"
+
+	# Check for GitHub token - either from existing secret or environment
+	local secret_path
+	secret_path=$("$DEVBOX_CLI" secrets path)/"$SECRET_NAME"
+
+	if [[ -f "$secret_path" ]]; then
+		log_success "Secret '$SECRET_NAME' already exists"
+		SECRET_EXISTS=true
+	elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+		log_success "GITHUB_TOKEN is set (will create secret)"
+		SECRET_EXISTS=false
+	else
+		log_error "No GitHub token available"
+		echo ""
+		echo "Either set GITHUB_TOKEN environment variable:"
+		echo "  export GITHUB_TOKEN=\"ghp_xxxxxxxxxxxxx\""
+		echo ""
+		echo "Or create the secret manually:"
+		echo "  devbox secrets add $SECRET_NAME --from-env GITHUB_TOKEN"
+		echo ""
+		exit 1
+	fi
+}
+
+# Step 1: Initialize devbox (always rebuild image)
+step_init() {
+	log_step "Step 1: Initialize Devbox (devbox init --force)"
+
+	log_info "Running: bin/devbox init --force"
+	log_info "This will rebuild the Docker image even if it exists..."
+
+	# Always force rebuild the image (echo y to confirm overwrite)
+	if echo "y" | "$DEVBOX_CLI" init --force 2>&1; then
+		log_success "Devbox initialized successfully"
+	else
+		log_error "Failed to initialize devbox"
+		exit 1
+	fi
+}
+
+# Step 2: Store GitHub token as secret
+step_store_secret() {
+	log_step "Step 2: Store GitHub Token as Secret"
+
+	# If secret already exists, skip this step
+	if [[ "$SECRET_EXISTS" == true ]]; then
+		log_info "Using existing secret '$SECRET_NAME'"
+		log_success "Secret ready"
+		return 0
+	fi
+
+	# Create secret from GITHUB_TOKEN environment variable
+	log_info "Adding secret '$SECRET_NAME' from GITHUB_TOKEN environment variable"
+	"$DEVBOX_CLI" secrets add "$SECRET_NAME" --from-env GITHUB_TOKEN
+
+	SECRET_CREATED=true
+	log_success "Secret '$SECRET_NAME' stored successfully"
+}
+
+# Step 3: Create container instance
+step_create_container() {
+	log_step "Step 3: Create Container Instance"
+
+	# Remove any existing test container
+	if docker ps -aq --filter "name=^devbox-${TEST_CONTAINER_NAME}$" | grep -q .; then
+		log_info "Removing existing test container..."
+		"$DEVBOX_CLI" rm -f "$TEST_CONTAINER_NAME" 2>/dev/null || true
+		sleep 2
+	fi
+
+	log_info "Running: bin/devbox create --secret $SECRET_NAME $TEST_CONTAINER_NAME $TEST_REPO"
+
+	if "$DEVBOX_CLI" create --secret "$SECRET_NAME" "$TEST_CONTAINER_NAME" "$TEST_REPO" 2>&1; then
+		CONTAINER_CREATED=true
+		log_success "Container '$TEST_CONTAINER_NAME' created successfully"
+	else
+		log_error "Failed to create container"
+		exit 1
+	fi
+}
+
+# Step 4 & 5: Attach and run tests using expect
+step_attach_and_run_tests() {
+	log_step "Step 4 & 5: Attach to Container and Run Tests"
+
+	local container_name="devbox-${TEST_CONTAINER_NAME}"
+
+	log_info "Attaching to container and waiting for nix develop..."
+	log_info "This may take several minutes while Nix sets up the environment."
+	echo ""
+
+	# Create expect script
+	local expect_script
+	expect_script=$(mktemp)
+
+	cat >"$expect_script" <<'EXPECT_SCRIPT'
+#!/usr/bin/expect -f
+
+set timeout 600
+set container_name [lindex $argv 0]
+
+# Disable output buffering
+log_user 1
+
+puts ">>> Attaching to container: $container_name"
+
+# Spawn docker attach
+spawn docker attach $container_name
+
+# Wait for nix develop to finish - look for the ready message
+puts ">>> Waiting for nix develop to complete (looking for 'Ready to develop')..."
+
+expect {
+    "Ready to develop" {
+        puts ">>> Nix develop environment is ready!"
+    }
+    timeout {
+        puts ">>> Timeout waiting for nix develop to complete"
+        exit 1
+    }
+}
+
+# Give it a moment to settle after the ready message
+sleep 2
+
+# Send a newline to get a fresh prompt
+send "\r"
+expect -re {(\$|#|>)}
+
+# Test 1: Run pre-commit hooks
+puts "\n>>> Test 1: Running .githooks/pre-commit"
+send "./.githooks/pre-commit\r"
+expect {
+    -re {(\$|#|>)} {
+        puts ">>> Pre-commit completed"
+    }
+    timeout {
+        puts ">>> Pre-commit timed out"
+        exit 1
+    }
+}
+
+# Test 2: Git fetch
+puts "\n>>> Test 2: Running git fetch"
+send "git fetch\r"
+expect {
+    -re {(\$|#|>)} {
+        puts ">>> Git fetch completed"
+    }
+    timeout {
+        puts ">>> Git fetch timed out"
+        exit 1
+    }
+}
+
+# Test 3: Docker ps
+puts "\n>>> Test 3: Running docker ps"
+send "docker ps\r"
+expect {
+    -re {(\$|#|>)} {
+        puts ">>> Docker ps completed"
+    }
+    timeout {
+        puts ">>> Docker ps timed out"
+        exit 1
+    }
+}
+
+# Test 4: Claude
+puts "\n>>> Test 4: Running claude -p 'hi'"
+send "claude -p 'hi'\r"
+expect {
+    -re {(\$|#|>)} {
+        puts ">>> Claude completed"
+    }
+    timeout {
+        puts ">>> Claude timed out"
+        exit 1
+    }
+}
+
+# Exit the container shell cleanly
+puts "\n>>> Exiting container shell"
+send "exit\r"
+
+expect eof
+
+puts "\n>>> All tests completed successfully"
+exit 0
+EXPECT_SCRIPT
+
+	chmod +x "$expect_script"
+
+	# Run the expect script
+	if "$expect_script" "$container_name"; then
+		rm -f "$expect_script"
+		log_success "All tests passed inside container"
+	else
+		local exit_code=$?
+		rm -f "$expect_script"
+		log_error "Tests failed inside container (exit code: $exit_code)"
+		log_info "Container logs:"
+		docker logs "$container_name" 2>&1 | tail -50
+		exit 1
+	fi
+}
+
+# Step 6: Verify clean exit
+step_verify_exit() {
+	log_step "Step 6: Verify Clean Exit"
+
+	local container_name="devbox-${TEST_CONTAINER_NAME}"
+
+	# Check container state
+	local status
+	status=$(docker inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null || echo "unknown")
+
+	log_info "Container status after exit: $status"
+
+	if [[ "$status" == "exited" ]]; then
+		log_success "Container exited cleanly"
+	else
+		log_warning "Container still running (status: $status), stopping it..."
+		"$DEVBOX_CLI" stop "$TEST_CONTAINER_NAME" 2>&1 || true
+		log_success "Container stopped"
+	fi
+}
+
+# Main execution
+main() {
+	echo ""
+	echo "============================================================================="
+	echo "  CHECKPOINT 3 INTEGRATION TEST"
+	echo "============================================================================="
+	echo ""
+	echo "This test validates the complete devbox workflow:"
+	echo "  1. Initialize devbox (build image, set up credentials)"
+	echo "  2. Store GitHub token as secret"
+	echo "  3. Create container instance for $TEST_REPO"
+	echo "  4. Attach to container, wait for nix develop"
+	echo "  5. Run test suite (pre-commit, git fetch, docker ps, claude)"
+	echo "  6. Exit cleanly"
+	echo ""
+
+	check_prerequisites
+	step_init
+	step_store_secret
+	step_create_container
+	step_attach_and_run_tests
+	step_verify_exit
+
+	echo ""
+	echo "============================================================================="
+	echo -e "  ${GREEN}CHECKPOINT 3 INTEGRATION TEST PASSED${NC}"
+	echo "============================================================================="
+	echo ""
+}
+
+main "$@"

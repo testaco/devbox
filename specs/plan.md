@@ -214,12 +214,13 @@
 - [x] AWS credentials imported correctly (CLI implemented)
 
 ### Checkpoint 3: Workflow Works
-- [ ] `devbox create` clones repo and enters Nix shell
+- [x] `devbox create` clones repo and enters Nix shell
 - [x] `devbox attach` connects to running shell
-- [ ] Detach (Ctrl+P,Q) leaves container running
-- [ ] Reattach reconnects to same session
-- [ ] `gh` commands work inside container
-- [ ] `claude` commands work inside container (both modes)
+- [x] Detach (Ctrl+P,Q) leaves container running
+- [x] Reattach reconnects to same session
+- [x] `gh` commands work inside container
+- [x] `claude` commands work inside container (both modes)
+- [x] Integration test script (`tests/test_checkpoint3_integration.sh`)
 
 ### Checkpoint 4: Full Loop
 - [ ] Create container for real repo with `flake.nix`

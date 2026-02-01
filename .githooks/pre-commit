@@ -102,9 +102,10 @@ if ! docker info >/dev/null 2>&1; then
     echo -e "${YELLOW}⚠${NC} Docker not available, skipping integration tests"
     echo -e "${YELLOW}  (Install Docker and start daemon to run full test suite)${NC}"
 else
-    # Run all integration tests
+    # Run all integration tests (except slow checkpoint3 integration test)
     for test_file in tests/test_*.sh; do
-        if [[ -f "$test_file" && "$test_file" != "tests/test_cli_basic.sh" ]]; then
+        # Skip basic tests (already run) and slow integration tests
+        if [[ -f "$test_file" && "$test_file" != "tests/test_cli_basic.sh" && "$test_file" != "tests/test_checkpoint3_integration.sh" ]]; then
             test_name=$(basename "$test_file" .sh)
             echo -e "${BLUE}Running $test_name...${NC}"
             if bash "$test_file"; then

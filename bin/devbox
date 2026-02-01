@@ -166,6 +166,7 @@ cmd_init() {
 	local import_aws=false
 	local aws_profile=""
 	local dry_run=false
+	local force=false
 
 	# Parse flags
 	while [[ $# -gt 0 ]]; do
@@ -190,6 +191,10 @@ cmd_init() {
 			dry_run=true
 			shift
 			;;
+		--force)
+			force=true
+			shift
+			;;
 		--help | -h)
 			cat <<EOF
 devbox init - One-time setup: authenticate Claude Code and AWS
@@ -201,6 +206,7 @@ OPTIONS:
     --bedrock              Skip Claude OAuth, configure for Bedrock mode
     --import-aws           Import existing AWS credentials from ~/.aws
     --aws-profile <name>   AWS profile to authenticate (requires --import-aws)
+    --force                Force rebuild of Docker image even if it exists
     --help, -h             Show this help message
 
 DESCRIPTION:
@@ -254,6 +260,20 @@ EOF
 	fi
 
 	log_info "Starting devbox initialization..."
+
+	# Force rebuild of Docker image if requested
+	if [[ "$force" == true ]]; then
+		log_info "Force mode: rebuilding Docker image..."
+		if docker image inspect "$DEVBOX_IMAGE" >/dev/null 2>&1; then
+			docker rmi -f "$DEVBOX_IMAGE" >/dev/null 2>&1 || true
+		fi
+		log_info "Building devbox base image..."
+		if ! docker build -t "$DEVBOX_IMAGE" "$PROJECT_ROOT/docker"; then
+			log_error "Failed to build devbox base image"
+			return 1
+		fi
+		log_success "Base image rebuilt successfully"
+	fi
 
 	# Check if credential volume already exists
 	if docker volume inspect "$DEVBOX_VOLUME" >/dev/null 2>&1; then
