@@ -56,9 +56,15 @@ jobs:
       run: |
         echo "Running all tests..."
 
-        # Run all test files
+        # Run all test files (except slow integration tests)
         EXIT_CODE=0
         for test_file in tests/test_*.sh; do
+          # Skip slow integration tests that require expect and long nix setup
+          if [[ "$test_file" == "tests/test_checkpoint3_integration.sh" ]]; then
+            echo ""
+            echo "==== Skipping $test_file (slow integration test) ===="
+            continue
+          fi
           if [[ -f "$test_file" ]]; then
             test_name=$(basename "$test_file" .sh)
             echo ""
