@@ -698,25 +698,6 @@ EOF
 		labels="$labels --label devbox.ports=$port_labels"
 	fi
 
-	# Detect Docker socket location (rootless vs root vs Colima)
-	local docker_socket=""
-	local docker_host_var=""
-	local is_colima=false
-
-	if [ -S "/run/user/$(id -u)/docker.sock" ]; then
-		# Rootless Docker
-		docker_socket="/run/user/$(id -u)/docker.sock"
-		docker_host_var="unix:///var/run/docker.sock"
-	elif [ -S "/var/run/docker.sock" ]; then
-		# Root Docker
-		docker_socket="/var/run/docker.sock"
-		docker_host_var="unix:///var/run/docker.sock"
-	elif [ -S "$HOME/.colima/default/docker.sock" ]; then
-		# Colima Docker (macOS) - special handling needed
-		is_colima=true
-		docker_host_var="unix:///home/devbox/.colima/default/docker.sock"
-	fi
-
 	# Build Docker run command
 	local docker_cmd="docker run -dit"
 	docker_cmd="$docker_cmd --name $full_container_name"
@@ -728,17 +709,12 @@ EOF
 		docker_cmd="$docker_cmd -v ${secrets_volume}:/run/secrets:ro"
 	fi
 
-	# Mount Docker socket if available
-	if [ -n "$docker_socket" ]; then
-		docker_cmd="$docker_cmd -v ${docker_socket}:/var/run/docker.sock"
-		docker_cmd="$docker_cmd -e DOCKER_HOST=${docker_host_var}"
-	elif [ "$is_colima" = true ]; then
-		# For Colima (macOS), use Docker-in-Docker since socket mounting doesn't work
-		docker_cmd="$docker_cmd --privileged"
-		docker_cmd="$docker_cmd -e DOCKER_TLS_CERTDIR="
-		docker_cmd="$docker_cmd -e DEVBOX_DOCKER_IN_DOCKER=true"
-		log_info "Using Docker-in-Docker for macOS/Colima compatibility"
-	fi
+	# Use Docker-in-Docker for security isolation
+	# This prevents container escape via host Docker socket
+	# (mounting host socket would allow: docker run -v /:/host ubuntu cat /host/etc/passwd)
+	docker_cmd="$docker_cmd --privileged"
+	docker_cmd="$docker_cmd -e DOCKER_TLS_CERTDIR="
+	docker_cmd="$docker_cmd -e DEVBOX_DOCKER_IN_DOCKER=true"
 
 	docker_cmd="$docker_cmd $port_args"
 	docker_cmd="$docker_cmd $env_vars"

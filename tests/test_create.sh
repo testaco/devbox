@@ -208,6 +208,46 @@ test_create_bedrock_mode() {
 	fi
 }
 
+test_create_uses_dind_for_security() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# Verify Docker-in-Docker is always used for security isolation
+	# This prevents container escape via host Docker socket
+	if output=$("$DEVBOX_CLI" create test-dind "$TEST_REPO" --dry-run 2>&1); then
+		if [[ "$output" == *"--privileged"* ]] &&
+			[[ "$output" == *"DEVBOX_DOCKER_IN_DOCKER=true"* ]]; then
+			log_test "create always uses Docker-in-Docker for security"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create must use Docker-in-Docker (--privileged and DEVBOX_DOCKER_IN_DOCKER=true)"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create failed in dry-run mode"
+	fi
+}
+
+test_create_no_host_socket_mount() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# Verify host Docker socket is NOT mounted (security vulnerability)
+	if output=$("$DEVBOX_CLI" create test-no-socket "$TEST_REPO" --dry-run 2>&1); then
+		if [[ "$output" != *"/var/run/docker.sock:/var/run/docker.sock"* ]] &&
+			[[ "$output" != *"docker.sock:/var/run/docker.sock"* ]]; then
+			log_test "create does NOT mount host Docker socket (security)"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "SECURITY ISSUE: create should not mount host Docker socket"
+			echo "This allows container escape: docker run -v /:/host ubuntu cat /host/etc/passwd"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create failed in dry-run mode"
+	fi
+}
+
 test_create_name_already_exists() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output exit_code
@@ -519,6 +559,8 @@ main() {
 	test_create_basic_container
 	test_create_with_ports
 	test_create_bedrock_mode
+	test_create_uses_dind_for_security
+	test_create_no_host_socket_mount
 	test_create_name_already_exists
 	test_create_complex_command
 

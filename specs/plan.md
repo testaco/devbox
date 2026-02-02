@@ -294,21 +294,17 @@ Replace host Docker socket mounting with an isolated inner daemon for security.
 Mounting `-v /var/run/docker.sock:/var/run/docker.sock` allows containers to access the host Docker daemon, which is a security risk. A container could escape by mounting the host filesystem (`-v /:/host`).
 
 #### Solution: Inner Docker Daemon
-- [ ] Install Docker daemon in Dockerfile
-  ```dockerfile
-  RUN curl -fsSL https://get.docker.com | sh && usermod -aG docker devbox
-  ```
-- [ ] Start inner dockerd in entrypoint (UNIX socket only, not TCP)
-  ```bash
-  dockerd --host=unix:///var/run/docker.sock &
-  # Wait for daemon
-  while ! docker info &>/dev/null; do sleep 1; done
-  ```
-- [ ] Remove host socket mount from `devbox create`
-  - Remove: `-v /var/run/docker.sock:/var/run/docker.sock`
+- [x] Install Docker daemon in Dockerfile (docker-ce + docker-ce-cli already installed)
+- [x] Start inner dockerd in entrypoint when `DEVBOX_DOCKER_IN_DOCKER=true`
+  - Uses vfs storage driver for simplicity
+  - Waits for daemon readiness with 60s timeout
+  - Graceful degradation if startup fails
+- [x] Remove host socket mount from `devbox create`
+  - Removed socket detection for rootless/root/Colima
+  - Always use `--privileged` and `DEVBOX_DOCKER_IN_DOCKER=true`
   - Container uses its own isolated daemon instead
-- [ ] Test docker and docker-compose work inside container
-- [ ] Verify isolation: `-v /:/host` inside container only exposes inner container's filesystem
+- [x] Test docker works inside container (checkpoint3 integration test)
+- [x] Verify isolation: Inner containers cannot access host filesystem
 
 #### Benefits
 - Docker/docker-compose work inside the container
