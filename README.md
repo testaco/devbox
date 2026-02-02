@@ -82,40 +82,69 @@ sudo ./install.sh
 
 ## Quick Start
 
+### For Users
+
+```bash
+# 1. Install devbox
+git clone git@github.com:your-org/devbox.git
+cd devbox
+./install.sh --prefix ~/.local
+
+# 2. Initialize (one-time)
+devbox init                                    # Claude OAuth mode
+# OR
+devbox init --bedrock --import-aws             # AWS Bedrock mode
+
+# 3. Store your GitHub token (one-time)
+export GITHUB_TOKEN="ghp_xxx..."
+devbox secrets add github-token --from-env GITHUB_TOKEN
+
+# 4. Create a container
+devbox create myproject org/repo --secret github-token
+
+# 5. Start working
+devbox attach myproject
+```
+
 ### For Development (Contributors)
 
 If you want to contribute to devbox itself:
 
 #### Prerequisites
 
-- [Nix](https://nixos.org/download.html) with flakes enabled
+- [Nix](https://nixos.org/download.html) with flakes enabled (optional but recommended)
 - Docker (Docker Desktop or alternatives like Colima on macOS)
 
 #### Development Setup
 
-1. **Enter the development environment:**
+1. **Enter the development environment (if using Nix):**
    ```bash
    nix develop
    ```
 
 2. **Verify the setup:**
    ```bash
-   devbox help          # Test the CLI
-   devbox-test          # Run basic tests
-   devbox-lint          # Check code quality
+   ./bin/devbox help    # Test the CLI
+   devbox-test          # Run basic tests (in Nix shell)
+   devbox-lint          # Check code quality (in Nix shell)
    ```
 
 3. **Initialize devbox (one-time setup):**
    ```bash
-   ./bin/devbox init --bedrock --import-aws                    # For AWS Bedrock mode (all SSO profiles)
-   ./bin/devbox init --bedrock --import-aws --aws-profile prod # For AWS Bedrock mode (specific profile)
+   ./bin/devbox init                           # Claude OAuth mode
    # OR
-   ./bin/devbox init                                           # For Claude OAuth mode
+   ./bin/devbox init --bedrock --import-aws    # AWS Bedrock mode
    ```
 
-4. **Create your first development container:**
+4. **Store your GitHub token:**
    ```bash
-   ./bin/devbox create myproject git@github.com:org/repo.git
+   export GITHUB_TOKEN="ghp_xxx..."
+   ./bin/devbox secrets add github-token --from-env GITHUB_TOKEN
+   ```
+
+5. **Create your first development container:**
+   ```bash
+   ./bin/devbox create myproject org/repo --secret github-token
    ```
 
 ### Development Workflow
@@ -139,31 +168,127 @@ devbox-build     # Build the Docker base image
 
 ### Commands
 
-- `devbox init [--bedrock] [--import-aws] [--aws-profile <name>]` - One-time setup: authenticate GitHub CLI and Claude Code
-- `devbox create <name> <repo>` - Create and start a new container instance
-- `devbox list` - List all devbox containers with status
-- `devbox attach <name|id>` - Attach to a running container's shell
-- `devbox stop <name|id>` - Stop a container (keeps state)
-- `devbox start <name|id>` - Start a stopped container
-- `devbox rm <name|id>` - Remove a container
+| Command | Description |
+|---------|-------------|
+| `devbox init` | One-time setup: authenticate Claude Code and AWS |
+| `devbox create <name> <repo>` | Create and start a new container instance |
+| `devbox list` | List all devbox containers with status |
+| `devbox attach <name\|id>` | Attach to a running container's shell |
+| `devbox stop <name\|id>` | Stop a container (keeps state) |
+| `devbox start <name\|id>` | Start a stopped container |
+| `devbox rm <name\|id>` | Remove a container |
+| `devbox logs <name\|id>` | View container logs |
+| `devbox exec <name\|id> <cmd>` | Execute a command in a running container |
+| `devbox ports <name\|id>` | Show port mappings for a container |
+| `devbox secrets <subcommand>` | Manage secrets (add, remove, list, path, import-env) |
+| `devbox help` | Show help message |
+
+### Secrets Management
+
+Devbox uses secure secret storage for sensitive credentials like GitHub tokens. Secrets are stored with restricted permissions and injected into containers via Docker volumes (never as environment variables).
+
+```bash
+# Add a secret from an environment variable
+export GITHUB_TOKEN="ghp_xxx..."
+devbox secrets add github-token --from-env GITHUB_TOKEN
+
+# Or import directly from an existing env var
+devbox secrets import-env GITHUB_TOKEN
+
+# List stored secrets
+devbox secrets list
+
+# Remove a secret
+devbox secrets remove github-token
+
+# Show secrets storage path
+devbox secrets path
+```
+
+### Init Options
+
+| Option | Description |
+|--------|-------------|
+| `--bedrock` | Skip Claude OAuth, configure for AWS Bedrock mode |
+| `--import-aws` | Import existing AWS credentials from ~/.aws |
+| `--aws-profile <name>` | Specific AWS profile to authenticate |
+
+### Create Options
+
+| Option | Description |
+|--------|-------------|
+| `--port, -p <host:container>` | Port mapping (can be used multiple times) |
+| `--secret <name>` | Use stored secret for GITHUB_TOKEN |
+| `--bedrock` | Use AWS Bedrock for Claude |
+| `--aws-profile <profile>` | AWS profile name for Bedrock |
+
+### Rm Options
+
+| Option | Description |
+|--------|-------------|
+| `--force, -f` | Force remove a running container |
+| `-a` | Remove all devbox containers (with confirmation) |
+| `-af, -fa` | Remove all devbox containers including running ones |
+
+### Logs Options
+
+| Option | Description |
+|--------|-------------|
+| `-f, --follow` | Follow log output (like `tail -f`) |
 
 ### Authentication Modes
 
 **Claude OAuth Mode (default):**
 ```bash
+# One-time setup
 devbox init
-devbox create myapp git@github.com:org/repo.git
+
+# Store your GitHub token securely
+export GITHUB_TOKEN="ghp_xxx..."
+devbox secrets add github-token --from-env GITHUB_TOKEN
+
+# Create container
+devbox create myapp org/repo --secret github-token
 ```
 
 **AWS Bedrock Mode:**
 ```bash
-# Authenticate all SSO profiles
+# One-time setup with AWS credentials
 devbox init --bedrock --import-aws
-devbox create myapp git@github.com:org/repo.git --bedrock --aws-profile prod
 
-# Authenticate specific SSO profile only
-devbox init --bedrock --import-aws --aws-profile prod
-devbox create myapp git@github.com:org/repo.git --bedrock --aws-profile prod
+# Store your GitHub token
+devbox secrets import-env GITHUB_TOKEN
+
+# Create container with Bedrock
+devbox create myapp org/repo --secret github-token --bedrock --aws-profile prod
+```
+
+### Common Workflows
+
+**Create a development container with port forwarding:**
+```bash
+devbox create webapp org/my-web-app --secret github-token -p 3000:3000 -p 8080:8080
+devbox attach webapp
+```
+
+**Check container status and logs:**
+```bash
+devbox list
+devbox logs webapp -f
+devbox ports webapp
+```
+
+**Execute commands without attaching:**
+```bash
+devbox exec webapp gh pr list
+devbox exec webapp npm test
+```
+
+**Clean up containers:**
+```bash
+devbox stop webapp     # Stop but keep state
+devbox rm webapp       # Remove (prompts for confirmation)
+devbox rm -af          # Remove all containers (force)
 ```
 
 ## Development
@@ -174,18 +299,25 @@ devbox create myapp git@github.com:org/repo.git --bedrock --aws-profile prod
 devbox/
 ├── bin/
 │   └── devbox              # Main CLI script (bash)
+├── completions/
+│   └── devbox.bash         # Bash tab-completion
 ├── docker/
 │   ├── Dockerfile          # Base image definition
 │   ├── entrypoint.sh       # Container entrypoint
 │   └── init-credentials.sh # Credential initialization
+├── lib/
+│   └── progress.sh         # Progress indicator library
 ├── tests/
 │   ├── test_cli_basic.sh   # Basic CLI tests
 │   ├── test_init.sh        # Init command tests
 │   ├── test_create.sh      # Create command tests
+│   ├── test_secrets.sh     # Secrets management tests
 │   └── ...                 # Individual command tests
 ├── specs/
-│   └── spec.md            # Detailed specification
-├── flake.nix              # Nix development environment
+│   └── spec.md             # Detailed specification
+├── base-flake/             # Template Nix flake for containers
+├── install.sh              # Installation script
+├── flake.nix               # Nix development environment
 └── README.md
 ```
 
@@ -209,7 +341,7 @@ This project supports "developing devbox inside of devbox" - using devbox itself
 
 1. **Set up your devbox repo in a devbox container:**
    ```bash
-   devbox create devbox-dev git@github.com:your-org/devbox.git
+   devbox create devbox-dev your-org/devbox --secret github-token
    devbox attach devbox-dev
    ```
 
