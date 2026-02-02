@@ -82,8 +82,6 @@ sudo ./install.sh
 
 ## Quick Start
 
-### For Users
-
 ```bash
 # 1. Install devbox
 git clone git@github.com:your-org/devbox.git
@@ -104,64 +102,6 @@ devbox create myproject org/repo --secret github-token
 
 # 5. Start working
 devbox attach myproject
-```
-
-### For Development (Contributors)
-
-If you want to contribute to devbox itself:
-
-#### Prerequisites
-
-- [Nix](https://nixos.org/download.html) with flakes enabled (optional but recommended)
-- Docker (Docker Desktop or alternatives like Colima on macOS)
-
-#### Development Setup
-
-1. **Enter the development environment (if using Nix):**
-   ```bash
-   nix develop
-   ```
-
-2. **Verify the setup:**
-   ```bash
-   ./bin/devbox help    # Test the CLI
-   devbox-test          # Run basic tests (in Nix shell)
-   devbox-lint          # Check code quality (in Nix shell)
-   ```
-
-3. **Initialize devbox (one-time setup):**
-   ```bash
-   ./bin/devbox init                           # Claude OAuth mode
-   # OR
-   ./bin/devbox init --bedrock --import-aws    # AWS Bedrock mode
-   ```
-
-4. **Store your GitHub token:**
-   ```bash
-   export GITHUB_TOKEN="ghp_xxx..."
-   ./bin/devbox secrets add github-token --from-env GITHUB_TOKEN
-   ```
-
-5. **Create your first development container:**
-   ```bash
-   ./bin/devbox create myproject org/repo --secret github-token
-   ```
-
-### Development Workflow
-
-The Nix development shell provides:
-
-- **Code Quality**: `shellcheck` for bash linting, `shfmt` for formatting
-- **Testing**: Comprehensive test suite in `tests/`
-- **Docker Integration**: Build and manage devbox containers
-- **Development Tools**: Git, GitHub CLI, Node.js, and more
-
-**Available commands in the dev shell:**
-```bash
-devbox-test      # Run the test suite
-devbox-lint      # Lint all bash scripts
-devbox-format    # Format all bash scripts
-devbox-build     # Build the Docker base image
 ```
 
 ## Usage
@@ -293,6 +233,67 @@ devbox rm -af          # Remove all containers (force)
 
 ## Development
 
+### Prerequisites
+
+- [Nix](https://nixos.org/download.html) with flakes enabled (optional but recommended)
+- Docker (Docker Desktop or alternatives like Colima on macOS)
+
+### Getting Started
+
+1. **Clone and enter the development environment:**
+   ```bash
+   git clone git@github.com:your-org/devbox.git
+   cd devbox
+   nix develop    # If using Nix
+   ```
+
+2. **Set up pre-commit hooks:**
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+
+3. **Verify the setup:**
+   ```bash
+   ./bin/devbox help    # Test the CLI
+   devbox-test          # Run basic tests (in Nix shell)
+   devbox-lint          # Check code quality (in Nix shell)
+   ```
+
+4. **Initialize devbox (one-time setup):**
+   ```bash
+   ./bin/devbox init                           # Claude OAuth mode
+   # OR
+   ./bin/devbox init --bedrock --import-aws    # AWS Bedrock mode
+   ```
+
+5. **Store your GitHub token:**
+   ```bash
+   export GITHUB_TOKEN="ghp_xxx..."
+   ./bin/devbox secrets add github-token --from-env GITHUB_TOKEN
+   ```
+
+6. **Create your first development container:**
+   ```bash
+   ./bin/devbox create myproject org/repo --secret github-token
+   ```
+
+### Development Workflow
+
+The Nix development shell provides:
+
+- **Code Quality**: `shellcheck` for bash linting, `shfmt` for formatting
+- **Testing**: Comprehensive test suite in `tests/`
+- **Docker Integration**: Build and manage devbox containers
+- **Development Tools**: Git, GitHub CLI, Node.js, and more
+
+**Available commands in the dev shell:**
+```bash
+devbox-test      # Run the test suite
+devbox-lint      # Lint all bash scripts
+devbox-format    # Format all bash scripts
+devbox-build     # Build the Docker base image
+```
+
 ### Project Structure
 
 ```
@@ -305,6 +306,8 @@ devbox/
 │   ├── Dockerfile          # Base image definition
 │   ├── entrypoint.sh       # Container entrypoint
 │   └── init-credentials.sh # Credential initialization
+├── .githooks/
+│   └── pre-commit          # Pre-commit hook (runs tests)
 ├── lib/
 │   └── progress.sh         # Progress indicator library
 ├── tests/
@@ -350,41 +353,11 @@ This project supports "developing devbox inside of devbox" - using devbox itself
    - Docker-in-Docker for testing container operations
    - Full development workflow including testing and building
 
-### Setting Up Pre-commit Hooks
-
-After cloning the repository, set up the pre-commit hook to run tests before each commit:
-
-```bash
-# Copy the hook template
-cat > .git/hooks/pre-commit << 'EOF'
-#!/bin/bash
-# Pre-commit hook for devbox - runs all tests before allowing commits
-
-set -e
-cd "$(git rev-parse --show-toplevel)"
-
-echo "Running pre-commit tests..."
-
-# Run all test suites
-for test_file in tests/test_*.sh; do
-    if [[ -x "$test_file" ]]; then
-        echo "=== Running $test_file ==="
-        bash "$test_file" || exit 1
-    fi
-done
-
-echo "All tests passed!"
-EOF
-
-# Make it executable
-chmod +x .git/hooks/pre-commit
-```
-
 ### Contributing
 
 1. **Code Quality**: All bash scripts should pass `shellcheck` and be formatted with `shfmt`
 2. **Testing**: Add tests for new commands in `tests/test_<command>.sh`
-3. **Pre-commit Hooks**: Set up pre-commit hooks (see above) to catch issues early
+3. **Pre-commit Hooks**: Run `git config core.hooksPath .githooks` to enable
 4. **Documentation**: Update help text and examples for new features
 
 ## Architecture
