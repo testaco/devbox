@@ -344,12 +344,46 @@ Mounting `-v /var/run/docker.sock:/var/run/docker.sock` allows containers to acc
 - [x] Test entrypoint has no TCP socket
 - [x] Update bash completion for new flags
 
+### Token-Based Claude Authentication
+
+Replace OAuth flow in `devbox init` with token-based authentication via `claude setup-token`.
+
+#### Problem
+The OAuth flow during `devbox init` is unreliable and requires browser interaction inside a container. Users need a simpler, more portable approach.
+
+#### Solution: Token-Based Auth
+- [x] Replace `--secret` flag with `--github-secret` and `--claude-code-secret` in `devbox create`
+- [x] Users run `claude setup-token` externally to get OAuth token
+- [x] Store token as devbox secret (`devbox secrets add claude-oauth-token`)
+- [x] Entrypoint reads token from `/run/secrets/claude_code_token`
+- [x] Export `CLAUDE_CODE_OAUTH_TOKEN` environment variable inside container
+- [x] Token not visible in `docker inspect` (set at runtime in entrypoint)
+- [x] Remove Claude OAuth flow from `devbox init` and `init-credentials.sh`
+- [x] Bedrock mode unchanged (only needs `--github-secret`)
+
+#### Validation Rules
+- Non-Bedrock (OAuth) mode: Both `--github-secret` AND `--claude-code-secret` required
+- Bedrock mode: Only `--github-secret` required
+
+#### Testing
+- [x] Test `--github-secret` flag validation
+- [x] Test `--claude-code-secret` flag validation
+- [x] Test OAuth mode requires both secrets
+- [x] Test Bedrock mode works without Claude secret
+- [x] Test secrets mounted correctly to `/run/secrets/`
+- [x] Test tokens not in environment variables (security)
+
+#### Documentation
+- [x] Update README.md with new workflow
+- [x] Update bash completion
+- [x] Update help text
+
 ---
 
 ## Known Risks / To Validate
 
 - [ ] **Nix in Docker**: Test Determinate installer actually works in container
-- [ ] **CLAUDE_CONFIG_DIR**: Verify this env var is correct (may need different approach)
-- [ ] **Token refresh**: Confirm Claude handles refresh automatically
+- [x] ~~**CLAUDE_CONFIG_DIR**: Verify this env var is correct~~ - Now using CLAUDE_CODE_OAUTH_TOKEN
+- [ ] **Token refresh**: Users must refresh tokens manually via `claude setup-token`
 - [ ] **ARM64 Nix**: Verify Nix works on Apple Silicon via Docker
 - [ ] **Large repos**: Test clone/attach performance with large monorepos

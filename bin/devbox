@@ -131,12 +131,13 @@ INIT OPTIONS:
     --import-aws           Import existing AWS credentials from ~/.aws
 
 CREATE OPTIONS:
+    --github-secret <name>       GitHub token secret (required)
+    --claude-code-secret <name>  Claude Code OAuth token secret (required for non-Bedrock)
     --port, -p <host:container>  Port mapping (repeatable)
-    --secret <name>        Use stored secret for GITHUB_TOKEN
-    --bedrock              Use AWS Bedrock for Claude (sets CLAUDE_CODE_USE_BEDROCK=1)
-    --aws-profile <profile>  AWS profile name
-    --enable-docker        Enable Docker-in-Docker functionality
-    --sudo <mode>          Enable sudo: nopass (passwordless) or password
+    --bedrock                    Use AWS Bedrock for Claude (no Claude OAuth needed)
+    --aws-profile <profile>      AWS profile name
+    --enable-docker              Enable Docker-in-Docker functionality
+    --sudo <mode>                Enable sudo: nopass (passwordless) or password
 
 RM OPTIONS:
     --force                Force remove a running container
@@ -148,21 +149,29 @@ LOGS OPTIONS:
     -f, --follow           Follow log output
 
 EXAMPLES:
-    # First-time setup (OAuth mode)
-    devbox init
-
     # First-time setup (Bedrock mode)
     devbox init --bedrock --import-aws
+
+    # First-time setup (OAuth mode - just GitHub/AWS setup)
+    devbox init
 
     # Store GitHub token as secret (one-time)
     export GITHUB_TOKEN="github_pat_xxx..."
     devbox secrets add github-token --from-env GITHUB_TOKEN
 
-    # Create container using stored secret
-    devbox create myapp org/repo --secret github-token --port 3000:3000
+    # For OAuth mode: get and store Claude token (one-time)
+    claude setup-token  # Follow prompts
+    devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN
 
-    # Create container for Bedrock
-    devbox create myapp org/repo --secret github-token --bedrock --aws-profile prod
+    # Create container (OAuth mode)
+    devbox create myapp org/repo \\
+      --github-secret github-token \\
+      --claude-code-secret claude-oauth-token
+
+    # Create container (Bedrock mode)
+    devbox create myapp org/repo \\
+      --github-secret github-token \\
+      --bedrock --aws-profile prod
 
     # List containers
     devbox list
@@ -418,7 +427,8 @@ cmd_create() {
 	local bedrock_mode=false
 	local aws_profile=""
 	local dry_run=false
-	local secrets=()
+	local github_secret_name=""
+	local claude_secret_name=""
 	local enable_docker=false
 	local sudo_mode=""
 	local sudo_password_hash=""
@@ -434,12 +444,20 @@ cmd_create() {
 			ports+=("$2")
 			shift 2
 			;;
-		--secret)
+		--github-secret)
 			if [[ -z "${2:-}" ]]; then
-				log_error "Option $1 requires an argument"
+				log_error "Option $1 requires a secret name"
 				return 1
 			fi
-			secrets+=("$2")
+			github_secret_name="$2"
+			shift 2
+			;;
+		--claude-code-secret)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a secret name"
+				return 1
+			fi
+			claude_secret_name="$2"
 			shift 2
 			;;
 		--bedrock)
@@ -487,55 +505,68 @@ ARGUMENTS:
 
 OPTIONS:
     --port, -p <host:container>  Port mapping (repeatable)
-    --secret <name>        Secret to inject (repeatable, mounted to /run/secrets/<name>)
-                           First secret named 'github-token' is used for GitHub auth
-    --bedrock              Use AWS Bedrock for Claude (sets CLAUDE_CODE_USE_BEDROCK=1)
-    --aws-profile <profile>  AWS profile name
-    --enable-docker        Enable Docker-in-Docker functionality (requires elevated privileges)
-    --sudo <mode>          Enable sudo access: nopass (passwordless) or password (with password)
-    --help, -h             Show this help message
-
-ENVIRONMENT:
-    GITHUB_TOKEN            GitHub personal access token (alternative to --secret)
-                           Create at: GitHub → Settings → Developer settings → Tokens
+    --github-secret <name>       GitHub token secret (required)
+    --claude-code-secret <name>  Claude Code OAuth token secret (required for non-Bedrock)
+    --bedrock                    Use AWS Bedrock for Claude (no Claude OAuth needed)
+    --aws-profile <profile>      AWS profile name
+    --enable-docker              Enable Docker-in-Docker functionality
+    --sudo <mode>                Enable sudo: nopass (passwordless) or password
+    --help, -h                   Show this help message
 
 DESCRIPTION:
     Creates a new development container with the specified repository cloned
     and ready for development. The container runs in detached mode with a
     persistent shell session.
 
-    GitHub authentication can be provided via:
-      1. --secret github-token: Read token from stored secret (recommended, secure)
-      2. GITHUB_TOKEN environment variable
+    AUTHENTICATION:
+    Two secrets are required for OAuth mode:
+      1. --github-secret: GitHub personal access token for cloning repos
+      2. --claude-code-secret: Claude Code OAuth token from 'claude setup-token'
 
-    Secrets are securely injected via file mounts to /run/secrets/<name>,
+    For Bedrock mode (--bedrock), only --github-secret is required.
+    Claude authentication is handled via AWS credentials.
+
+    Secrets are securely injected via file mounts to /run/secrets/,
     not exposed as environment variables. The container reads them from files.
 
-    To store a token as a secret:
-      export GITHUB_TOKEN="github_pat_xxx..."
-      devbox secrets add github-token --from-env GITHUB_TOKEN
+SETUP:
+    # 1. Store GitHub token
+    export GITHUB_TOKEN="github_pat_xxx..."
+    devbox secrets add github-token --from-env GITHUB_TOKEN
+
+    # 2. For OAuth mode: get Claude token and store it
+    claude setup-token  # Follow prompts, then:
+    export CLAUDE_CODE_OAUTH_TOKEN="..."
+    devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN
 
 EXAMPLES:
-    # Basic container (no Docker, no sudo)
-    devbox create myapp org/repo --secret github-token
+    # OAuth mode (Claude Pro/Max subscription)
+    devbox create myapp org/repo \\
+      --github-secret github-token \\
+      --claude-code-secret claude-oauth-token
 
-    # With Docker-in-Docker enabled
-    devbox create myapp org/repo --secret github-token --enable-docker
-
-    # With passwordless sudo
-    devbox create myapp org/repo --secret github-token --sudo nopass
-
-    # With password-protected sudo (prompts for password)
-    devbox create myapp org/repo --secret github-token --sudo password
-
-    # Full-featured container with Docker and sudo
-    devbox create myapp org/repo --secret github-token --enable-docker --sudo nopass
+    # Bedrock mode (AWS Claude access)
+    devbox create myapp org/repo \\
+      --github-secret github-token \\
+      --bedrock --aws-profile prod
 
     # With port mapping
-    devbox create webapp org/webapp --secret github-token --port 3000:3000
+    devbox create webapp org/webapp \\
+      --github-secret github-token \\
+      --claude-code-secret claude-oauth-token \\
+      --port 3000:3000
 
-    # Bedrock mode with AWS profile
-    devbox create myapp org/repo --secret github-token --bedrock --aws-profile prod
+    # With Docker-in-Docker enabled
+    devbox create myapp org/repo \\
+      --github-secret github-token \\
+      --claude-code-secret claude-oauth-token \\
+      --enable-docker
+
+    # With passwordless sudo
+    devbox create myapp org/repo \\
+      --github-secret github-token \\
+      --claude-code-secret claude-oauth-token \\
+      --sudo nopass
 
 EOF
 			return 0
@@ -573,99 +604,118 @@ EOF
 
 	# Validate and prepare secrets
 	local secrets_volume=""
-	local github_token=""
 	local use_secrets_volume=false
 	local secret_values=()
 	local secret_targets=()
 
-	if [[ ${#secrets[@]} -gt 0 ]]; then
-		use_secrets_volume=true
-		secrets_volume="${CONTAINER_PREFIX}${container_name}-secrets"
-
-		# Validate each secret and collect values
-		for secret_name in "${secrets[@]}"; do
-			local secret_path
-			secret_path=$(get_secret_path "$secret_name")
-			if [[ ! -f "$secret_path" ]]; then
-				log_error "Secret '$secret_name' not found"
-				echo ""
-				echo "Available secrets:"
-				if [[ -d "$DEVBOX_SECRETS_DIR" ]] && [[ -n "$(ls -A "$DEVBOX_SECRETS_DIR" 2>/dev/null)" ]]; then
-					for f in "$DEVBOX_SECRETS_DIR"/*; do
-						echo "  - $(basename "$f")"
-					done
-				else
-					echo "  (none)"
-				fi
-				echo ""
-				echo "Add a secret with:"
-				echo "  devbox secrets add $secret_name --from-env YOUR_VAR"
-				echo ""
-				return 1
-			fi
-
-			local secret_value
-			secret_value=$(cat "$secret_path")
-			if [[ -z "$secret_value" ]]; then
-				log_error "Secret '$secret_name' is empty"
-				return 1
-			fi
-
-			# Map secret names to standard file names for container
-			# github-token -> github_token (for entrypoint compatibility)
-			local target_name="${secret_name//-/_}"
-
-			# If this secret contains "github" in the name, also write it as github_token
-			if [[ "$secret_name" == *github* ]] || [[ "$secret_name" == *GITHUB* ]]; then
-				secret_values+=("$secret_value")
-				secret_targets+=("github_token")
-				github_token="from-secrets-volume"
-			fi
-
-			# Also store under the original name (normalized with underscores)
-			secret_values+=("$secret_value")
-			secret_targets+=("$target_name")
-		done
-
-		# Require a github token for repo cloning
-		if [[ -z "$github_token" ]]; then
-			log_error "A GitHub token secret is required for repository cloning"
-			echo ""
-			echo "Provide a secret containing 'github' in the name:"
-			echo "  devbox create $container_name $repo_url --secret github-token"
-			echo "  devbox create $container_name $repo_url --secret my-github-token"
-			echo ""
-			return 1
+	# Helper function to show available secrets
+	show_available_secrets() {
+		echo "Available secrets:"
+		if [[ -d "$DEVBOX_SECRETS_DIR" ]] && [[ -n "$(ls -A "$DEVBOX_SECRETS_DIR" 2>/dev/null)" ]]; then
+			for f in "$DEVBOX_SECRETS_DIR"/*; do
+				echo "  - $(basename "$f")"
+			done
+		else
+			echo "  (none)"
 		fi
-	elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
-		# Fallback to environment variable (less secure)
-		github_token="$GITHUB_TOKEN"
-		# Show deprecation warning
-		log_warning "Using GITHUB_TOKEN environment variable (deprecated)"
+	}
+
+	# Validate GitHub secret (always required)
+	if [[ -z "$github_secret_name" ]]; then
+		log_error "GitHub secret is required: use --github-secret <name>"
 		echo ""
-		echo "  Environment variables are less secure than stored secrets."
-		echo "  The token is visible in 'docker inspect' output."
-		echo ""
-		echo "  Migrate to secure secrets storage:"
-		echo "    devbox secrets import-env GITHUB_TOKEN"
-		echo "    devbox create $container_name $repo_url --secret github-token"
-		echo ""
-	else
-		log_error "GitHub token required: use --secret github-token or set GITHUB_TOKEN"
-		echo ""
-		echo "Option 1 - Use a stored secret (recommended - secure):"
-		echo "  devbox secrets add github-token --from-env GITHUB_TOKEN"
-		echo "  devbox create $container_name $repo_url --secret github-token"
-		echo ""
-		echo "Option 2 - Use environment variable (less secure):"
+		echo "Store your GitHub token first:"
 		echo "  export GITHUB_TOKEN=\"github_pat_xxx...\""
-		echo "  devbox create $container_name $repo_url"
+		echo "  devbox secrets add github-token --from-env GITHUB_TOKEN"
 		echo ""
-		echo "Create a fine-grained GitHub token at:"
-		echo "  GitHub → Settings → Developer settings → Fine-grained tokens"
+		echo "Then create the container:"
+		echo "  devbox create $container_name $repo_url --github-secret github-token \\"
+		if [[ "$bedrock_mode" == true ]]; then
+			echo "    --bedrock --aws-profile <profile>"
+		else
+			echo "    --claude-code-secret claude-oauth-token"
+		fi
 		echo ""
 		return 1
 	fi
+
+	# Validate GitHub secret exists and has value
+	local github_secret_path
+	github_secret_path=$(get_secret_path "$github_secret_name")
+	if [[ ! -f "$github_secret_path" ]]; then
+		log_error "GitHub secret '$github_secret_name' not found"
+		echo ""
+		show_available_secrets
+		echo ""
+		echo "Add the secret with:"
+		echo "  devbox secrets add $github_secret_name --from-env GITHUB_TOKEN"
+		echo ""
+		return 1
+	fi
+
+	local github_token_value
+	github_token_value=$(cat "$github_secret_path")
+	if [[ -z "$github_token_value" ]]; then
+		log_error "GitHub secret '$github_secret_name' is empty"
+		return 1
+	fi
+
+	# Add GitHub token to secrets
+	secret_values+=("$github_token_value")
+	secret_targets+=("github_token")
+
+	# Validate Claude secret (required for non-Bedrock mode)
+	if [[ "$bedrock_mode" != true ]]; then
+		if [[ -z "$claude_secret_name" ]]; then
+			log_error "Claude Code secret is required for OAuth mode: use --claude-code-secret <name>"
+			echo ""
+			echo "1. Run 'claude setup-token' to get your OAuth token"
+			echo "2. Store the token:"
+			echo "   export CLAUDE_CODE_OAUTH_TOKEN=\"...\""
+			echo "   devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN"
+			echo ""
+			echo "3. Create the container:"
+			echo "   devbox create $container_name $repo_url \\"
+			echo "     --github-secret $github_secret_name \\"
+			echo "     --claude-code-secret claude-oauth-token"
+			echo ""
+			echo "Or use Bedrock mode (no Claude OAuth needed):"
+			echo "   devbox create $container_name $repo_url \\"
+			echo "     --github-secret $github_secret_name \\"
+			echo "     --bedrock --aws-profile <profile>"
+			echo ""
+			return 1
+		fi
+
+		local claude_secret_path
+		claude_secret_path=$(get_secret_path "$claude_secret_name")
+		if [[ ! -f "$claude_secret_path" ]]; then
+			log_error "Claude Code secret '$claude_secret_name' not found"
+			echo ""
+			show_available_secrets
+			echo ""
+			echo "1. Run 'claude setup-token' to get your OAuth token"
+			echo "2. Store the token:"
+			echo "   devbox secrets add $claude_secret_name --from-env CLAUDE_CODE_OAUTH_TOKEN"
+			echo ""
+			return 1
+		fi
+
+		local claude_token_value
+		claude_token_value=$(cat "$claude_secret_path")
+		if [[ -z "$claude_token_value" ]]; then
+			log_error "Claude Code secret '$claude_secret_name' is empty"
+			return 1
+		fi
+
+		# Add Claude token to secrets
+		secret_values+=("$claude_token_value")
+		secret_targets+=("claude_code_token")
+	fi
+
+	# We always use secrets volume now
+	use_secrets_volume=true
+	secrets_volume="${CONTAINER_PREFIX}${container_name}-secrets"
 
 	# Handle sudo password mode - prompt for password and generate hash
 	if [[ "$sudo_mode" == "password" ]]; then
@@ -714,10 +764,8 @@ EOF
 	local env_vars=""
 	env_vars="$env_vars -e DEVBOX_REPO=$repo_url"
 
-	# Only pass GITHUB_TOKEN via env var if NOT using secrets mount (less secure fallback)
-	if [[ "$use_secrets_volume" != true ]]; then
-		env_vars="$env_vars -e GITHUB_TOKEN=$github_token"
-	fi
+	# Note: GitHub token is always passed via secrets volume, not env var
+	# This keeps it out of 'docker inspect' output
 
 	# Configure authentication mode
 	local auth_mode="oauth"
@@ -807,13 +855,10 @@ EOF
 		echo "Would create container '$container_name' with:"
 		echo "  Repository: $repo_url"
 		echo "  Mode: $auth_mode"
-		if [[ ${#secrets[@]} -gt 0 ]]; then
-			echo "  Secrets (mounted to /run/secrets):"
-			for secret_name in "${secrets[@]}"; do
-				echo "    - $secret_name"
-			done
-		else
-			echo "  GitHub token: from environment"
+		echo "  Secrets (mounted to /run/secrets):"
+		echo "    - github_token (from --github-secret $github_secret_name)"
+		if [[ "$bedrock_mode" != true ]]; then
+			echo "    - claude_code_token (from --claude-code-secret $claude_secret_name)"
 		fi
 		if [[ -n "$aws_profile" ]]; then
 			echo "  AWS Profile: $aws_profile"

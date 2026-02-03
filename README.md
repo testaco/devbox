@@ -100,17 +100,29 @@ git clone git@github.com:your-org/devbox.git
 cd devbox
 ./install.sh --prefix ~/.local
 
-# 2. Initialize (one-time)
-devbox init                                    # Claude OAuth mode
+# 2. Initialize (one-time) - sets up credential volumes
+devbox init --bedrock --import-aws             # AWS Bedrock mode (recommended)
 # OR
-devbox init --bedrock --import-aws             # AWS Bedrock mode
+devbox init                                    # OAuth mode (manual token setup)
 
 # 3. Store your GitHub token (one-time)
 export GITHUB_TOKEN="ghp_xxx..."
 devbox secrets add github-token --from-env GITHUB_TOKEN
 
-# 4. Create a container
-devbox create myproject org/repo --secret github-token
+# 4a. For OAuth mode only: Get and store Claude Code token (one-time)
+claude setup-token                             # Follow prompts, then:
+devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN
+
+# 4b. Create a container
+# OAuth mode:
+devbox create myproject org/repo \
+  --github-secret github-token \
+  --claude-code-secret claude-oauth-token
+
+# Bedrock mode:
+devbox create myproject org/repo \
+  --github-secret github-token \
+  --bedrock --aws-profile prod
 
 # 5. Start working
 devbox attach myproject
@@ -169,9 +181,10 @@ devbox secrets path
 
 | Option | Description |
 |--------|-------------|
+| `--github-secret <name>` | GitHub token secret (required) |
+| `--claude-code-secret <name>` | Claude Code OAuth token secret (required for non-Bedrock mode) |
 | `--port, -p <host:container>` | Port mapping (can be used multiple times) |
-| `--secret <name>` | Use stored secret for GITHUB_TOKEN |
-| `--bedrock` | Use AWS Bedrock for Claude |
+| `--bedrock` | Use AWS Bedrock for Claude (no Claude OAuth needed) |
 | `--aws-profile <profile>` | AWS profile name for Bedrock |
 | `--enable-docker` | Enable Docker-in-Docker functionality (disabled by default for security) |
 | `--sudo <mode>` | Enable sudo access: `nopass` (passwordless) or `password` (prompts for password) |
@@ -192,7 +205,7 @@ devbox secrets path
 
 ### Authentication Modes
 
-**Claude OAuth Mode (default):**
+**Claude OAuth Mode:**
 ```bash
 # One-time setup
 devbox init
@@ -201,11 +214,17 @@ devbox init
 export GITHUB_TOKEN="ghp_xxx..."
 devbox secrets add github-token --from-env GITHUB_TOKEN
 
-# Create container
-devbox create myapp org/repo --secret github-token
+# Get and store Claude Code OAuth token
+claude setup-token                    # Follow prompts
+devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN
+
+# Create container (requires both secrets)
+devbox create myapp org/repo \
+  --github-secret github-token \
+  --claude-code-secret claude-oauth-token
 ```
 
-**AWS Bedrock Mode:**
+**AWS Bedrock Mode (recommended):**
 ```bash
 # One-time setup with AWS credentials
 devbox init --bedrock --import-aws
@@ -213,15 +232,28 @@ devbox init --bedrock --import-aws
 # Store your GitHub token
 devbox secrets import-env GITHUB_TOKEN
 
-# Create container with Bedrock
-devbox create myapp org/repo --secret github-token --bedrock --aws-profile prod
+# Create container (no Claude secret needed)
+devbox create myapp org/repo \
+  --github-secret github-token \
+  --bedrock --aws-profile prod
 ```
 
 ### Common Workflows
 
 **Create a development container with port forwarding:**
 ```bash
-devbox create webapp org/my-web-app --secret github-token -p 3000:3000 -p 8080:8080
+# OAuth mode
+devbox create webapp org/my-web-app \
+  --github-secret github-token \
+  --claude-code-secret claude-oauth-token \
+  -p 3000:3000 -p 8080:8080
+
+# Bedrock mode
+devbox create webapp org/my-web-app \
+  --github-secret github-token \
+  --bedrock \
+  -p 3000:3000 -p 8080:8080
+
 devbox attach webapp
 ```
 
@@ -280,15 +312,28 @@ devbox rm -af          # Remove all containers (force)
    ./bin/devbox init --bedrock --import-aws    # AWS Bedrock mode
    ```
 
-5. **Store your GitHub token:**
+5. **Store your secrets:**
    ```bash
+   # GitHub token (always required)
    export GITHUB_TOKEN="ghp_xxx..."
    ./bin/devbox secrets add github-token --from-env GITHUB_TOKEN
+
+   # For OAuth mode: get Claude token first
+   claude setup-token  # Follow prompts
+   ./bin/devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN
    ```
 
 6. **Create your first development container:**
    ```bash
-   ./bin/devbox create myproject org/repo --secret github-token
+   # OAuth mode
+   ./bin/devbox create myproject org/repo \
+     --github-secret github-token \
+     --claude-code-secret claude-oauth-token
+
+   # Bedrock mode
+   ./bin/devbox create myproject org/repo \
+     --github-secret github-token \
+     --bedrock --aws-profile prod
    ```
 
 ### Development Workflow
@@ -358,7 +403,16 @@ This project supports "developing devbox inside of devbox" - using devbox itself
 
 1. **Set up your devbox repo in a devbox container:**
    ```bash
-   devbox create devbox-dev your-org/devbox --secret github-token
+   # OAuth mode
+   devbox create devbox-dev your-org/devbox \
+     --github-secret github-token \
+     --claude-code-secret claude-oauth-token
+
+   # Bedrock mode
+   devbox create devbox-dev your-org/devbox \
+     --github-secret github-token \
+     --bedrock
+
    devbox attach devbox-dev
    ```
 
