@@ -9,9 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with UID 1000
+# Note: sudo access is NOT granted by default for security
+# Use --sudo flag with devbox create to enable sudo if needed
 RUN groupadd -g 1000 devbox 2>/dev/null || true && \
-    useradd -u 1000 -g 1000 -m -s /bin/bash devbox && \
-    echo "devbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    useradd -u 1000 -g 1000 -m -s /bin/bash devbox
 
 # Install Nix as devbox user (single-user mode)
 USER devbox

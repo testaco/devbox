@@ -45,11 +45,19 @@ fi
 export GITHUB_TOKEN
 
 # ============================================================================
-# Step 2: Set up Docker access (DinD or host socket)
+# Step 2: Set up Docker access (DinD only - host socket is not supported)
 # ============================================================================
 
 if [ "$DEVBOX_DOCKER_IN_DOCKER" = "true" ]; then
 	echo "🐳 Starting Docker-in-Docker..."
+
+	# Verify sudo is available (required for DinD)
+	if ! sudo -n true 2>/dev/null; then
+		echo "❌ ERROR: Docker-in-Docker requires sudo access"
+		echo "   Container was created with --enable-docker but sudo is not configured."
+		echo "   This is likely a configuration error."
+		exit 1
+	fi
 
 	# Clean up any leftover Docker state
 	sudo pkill -f dockerd || true
@@ -61,7 +69,8 @@ if [ "$DEVBOX_DOCKER_IN_DOCKER" = "true" ]; then
 	sleep 3
 
 	# Start Docker daemon
-	sudo dockerd --storage-driver=vfs --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 >/tmp/dockerd.log 2>&1 &
+	# Only expose Unix socket - no TCP socket for security
+	sudo dockerd --storage-driver=vfs --host=unix:///var/run/docker.sock >/tmp/dockerd.log 2>&1 &
 
 	# Wait for Docker daemon
 	echo "⏳ Waiting for Docker daemon to start..."
@@ -77,13 +86,8 @@ if [ "$DEVBOX_DOCKER_IN_DOCKER" = "true" ]; then
 			break
 		fi
 	done
-
-elif [ -S "/var/run/docker.sock" ]; then
-	echo "🔧 Fixing Docker socket permissions for host access..."
-	sudo chmod 666 /var/run/docker.sock
-	echo "✅ Docker socket permissions updated"
 else
-	echo "ℹ️  No Docker access configured"
+	echo "ℹ️  Docker not enabled (use --enable-docker flag to enable)"
 fi
 
 # ============================================================================

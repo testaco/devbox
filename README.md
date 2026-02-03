@@ -19,6 +19,18 @@ Devbox spins up lightweight Docker containers pre-configured with GitHub CLI and
 
 If you discover security issues, please report them responsibly via GitHub issues.
 
+## Security Features
+
+Devbox includes several security features to minimize the attack surface:
+
+**Docker-in-Docker is opt-in**: By default, containers do not have Docker access. Use `--enable-docker` to enable Docker-in-Docker functionality when needed. When enabled, minimal Linux capabilities are used instead of full `--privileged` mode.
+
+**Sudo is disabled by default**: The devbox user has no sudo access unless explicitly requested. Use `--sudo nopass` for passwordless sudo or `--sudo password` to set a password during container creation.
+
+**No TCP socket for inner Docker**: When Docker-in-Docker is enabled, the inner Docker daemon only listens on a Unix socket, not TCP, preventing network-based attacks.
+
+**Secrets are stored securely**: Secrets are stored with restricted file permissions (600) and mounted into containers via Docker volumes, never exposed as environment variables visible in `docker inspect`.
+
 ## Installation
 
 ### Prerequisites
@@ -161,6 +173,8 @@ devbox secrets path
 | `--secret <name>` | Use stored secret for GITHUB_TOKEN |
 | `--bedrock` | Use AWS Bedrock for Claude |
 | `--aws-profile <profile>` | AWS profile name for Bedrock |
+| `--enable-docker` | Enable Docker-in-Docker functionality (disabled by default for security) |
+| `--sudo <mode>` | Enable sudo access: `nopass` (passwordless) or `password` (prompts for password) |
 
 ### Rm Options
 

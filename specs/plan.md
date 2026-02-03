@@ -285,7 +285,7 @@ Replace environment variable approach (GITHUB_TOKEN) with a proper secrets syste
 #### Migration
 - [x] Deprecation warning when GITHUB_TOKEN env var is detected
 - [x] `devbox secrets import-env` to migrate from env vars to secrets
-- [ ] Update documentation to recommend secrets over env vars
+- [x] Update documentation to recommend secrets over env vars
 
 ### Docker-in-Docker Isolation
 Replace host Docker socket mounting with an isolated inner daemon for security.
@@ -310,6 +310,39 @@ Mounting `-v /var/run/docker.sock:/var/run/docker.sock` allows containers to acc
 - Docker/docker-compose work inside the container
 - Containers created inside are isolated from host
 - Host filesystem cannot be mounted from within devbox container
+
+### Security Hardening
+
+#### Docker Opt-in
+- [x] Add `--enable-docker` flag to `devbox create`
+- [x] Docker-in-Docker disabled by default (reduces attack surface)
+- [x] Update help text and documentation
+
+#### Sudo Configuration
+- [x] Remove default passwordless sudo from Dockerfile
+- [x] Add `--sudo` flag with modes: `nopass`, `password`
+- [x] For password mode, prompt user and generate SHA-512 hash
+- [x] Configure sudo via setup container (similar to secrets pattern)
+- [x] Clean up sudoers volume when container is removed
+
+#### Minimal Capabilities
+- [x] Replace `--privileged` with specific capabilities:
+  - `SYS_ADMIN` (for mounting)
+  - `NET_ADMIN` (for network namespaces)
+  - `MKNOD` (for device nodes)
+- [x] Add security options: `seccomp=unconfined`, `apparmor=unconfined`
+- [x] Add `cgroupns=private` for cgroup isolation
+
+#### No TCP Socket
+- [x] Remove `--host=tcp://0.0.0.0:2375` from dockerd startup
+- [x] Inner Docker daemon only listens on Unix socket
+
+#### Testing
+- [x] Test no Docker/sudo by default
+- [x] Test --enable-docker adds correct capabilities
+- [x] Test --sudo modes
+- [x] Test entrypoint has no TCP socket
+- [x] Update bash completion for new flags
 
 ---
 
