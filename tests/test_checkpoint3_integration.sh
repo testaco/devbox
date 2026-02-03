@@ -6,17 +6,18 @@ set -euo pipefail
 # =============================================================================
 # This test validates the complete devbox workflow using SECRETS (not env vars):
 #   1. Initialize devbox (build image, set up credentials)
-#   2. Verify GitHub token secret is available
-#   3. Create container instance using --github-secret flag (secure file injection)
+#   2. Verify GitHub and Claude token secrets are available
+#   3. Create container instance using --github-secret and --claude-code-secret
 #   4. Attach to container and wait for nix develop to be ready
 #   5. Run test suite inside container (.githooks/pre-commit, git fetch, docker ps, claude)
 #   6. Exit cleanly
 #
 # IMPORTANT: This test uses secure secret injection via Docker volumes.
-# The GITHUB_TOKEN env var is only used to SEED the secret store, not passed to containers.
+# Environment variables (GITHUB_TOKEN, CLAUDE_CODE_OAUTH_TOKEN) are only used to
+# SEED the secret store, not passed to containers.
 #
-# By default, this test runs in BEDROCK mode (--bedrock) which only requires GitHub token.
-# Set USE_OAUTH_MODE=1 to test OAuth mode (requires both GitHub and Claude tokens).
+# This test runs in OAuth mode (Claude Pro/Max subscription).
+# Both GitHub and Claude tokens are required.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,10 +30,6 @@ readonly TEST_REPO="testaco/devbox"
 readonly GITHUB_SECRET_NAME="devbox-github-token"
 readonly CLAUDE_SECRET_NAME="devbox-claude-token"
 readonly EXPECT_TIMEOUT=600 # 10 minutes max wait for nix develop
-
-# Use Bedrock mode by default (only needs GitHub token)
-# Set USE_OAUTH_MODE=1 to test OAuth mode (needs both tokens)
-USE_OAUTH_MODE="${USE_OAUTH_MODE:-0}"
 
 # Colors
 readonly RED='\033[0;31m'
@@ -157,31 +154,28 @@ check_prerequisites() {
 		exit 1
 	fi
 
-	# Check for Claude token secret (only needed for OAuth mode)
-	if [[ "$USE_OAUTH_MODE" == "1" ]]; then
-		if [[ -f "$secrets_path/$CLAUDE_SECRET_NAME" ]]; then
-			log_success "Claude secret '$CLAUDE_SECRET_NAME' already exists"
-			CLAUDE_SECRET_EXISTS=true
-		elif [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-			log_info "Importing CLAUDE_CODE_OAUTH_TOKEN as secret '$CLAUDE_SECRET_NAME'..."
-			"$DEVBOX_CLI" secrets add "$CLAUDE_SECRET_NAME" --from-env CLAUDE_CODE_OAUTH_TOKEN
-			CLAUDE_SECRET_CREATED=true
-			CLAUDE_SECRET_EXISTS=true
-			log_success "Secret '$CLAUDE_SECRET_NAME' created from CLAUDE_CODE_OAUTH_TOKEN"
-		else
-			log_error "OAuth mode requires Claude token"
-			echo ""
-			echo "Create the Claude secret first:"
-			echo "  claude setup-token"
-			echo "  devbox secrets add $CLAUDE_SECRET_NAME --from-env CLAUDE_CODE_OAUTH_TOKEN"
-			echo ""
-			echo "Or run in Bedrock mode (default):"
-			echo "  ./tests/test_checkpoint3_integration.sh"
-			echo ""
-			exit 1
-		fi
+	# Check for Claude token secret (always required for OAuth mode)
+	if [[ -f "$secrets_path/$CLAUDE_SECRET_NAME" ]]; then
+		log_success "Claude secret '$CLAUDE_SECRET_NAME' already exists"
+		CLAUDE_SECRET_EXISTS=true
+	elif [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+		log_info "Importing CLAUDE_CODE_OAUTH_TOKEN as secret '$CLAUDE_SECRET_NAME'..."
+		"$DEVBOX_CLI" secrets add "$CLAUDE_SECRET_NAME" --from-env CLAUDE_CODE_OAUTH_TOKEN
+		CLAUDE_SECRET_CREATED=true
+		CLAUDE_SECRET_EXISTS=true
+		log_success "Secret '$CLAUDE_SECRET_NAME' created from CLAUDE_CODE_OAUTH_TOKEN"
 	else
-		log_info "Running in Bedrock mode (no Claude token needed)"
+		log_error "Claude Code OAuth token required"
+		echo ""
+		echo "Create the Claude secret first:"
+		echo "  1. Run 'claude setup-token' to get your OAuth token"
+		echo "  2. Store the token:"
+		echo "     devbox secrets add $CLAUDE_SECRET_NAME --from-env CLAUDE_CODE_OAUTH_TOKEN"
+		echo ""
+		echo "Or run this test with CLAUDE_CODE_OAUTH_TOKEN set:"
+		echo "  GITHUB_TOKEN=\"ghp_xxx\" CLAUDE_CODE_OAUTH_TOKEN=\"...\" ./tests/test_checkpoint3_integration.sh"
+		echo ""
+		exit 1
 	fi
 }
 
@@ -213,15 +207,13 @@ step_verify_secret() {
 
 	log_info "Using secret '$GITHUB_SECRET_NAME' for GitHub authentication"
 
-	if [[ "$USE_OAUTH_MODE" == "1" ]]; then
-		if [[ "$CLAUDE_SECRET_EXISTS" != true ]]; then
-			log_error "Claude secret '$CLAUDE_SECRET_NAME' not available - this should not happen"
-			exit 1
-		fi
-		log_info "Using secret '$CLAUDE_SECRET_NAME' for Claude authentication"
-	else
-		log_info "Bedrock mode: Claude authentication via AWS credentials"
+	# Claude secret should already exist at this point (created in check_prerequisites)
+	if [[ "$CLAUDE_SECRET_EXISTS" != true ]]; then
+		log_error "Claude secret '$CLAUDE_SECRET_NAME' not available - this should not happen"
+		exit 1
 	fi
+
+	log_info "Using secret '$CLAUDE_SECRET_NAME' for Claude authentication"
 
 	log_success "Secrets ready (secure file-based injection)"
 }
@@ -237,18 +229,13 @@ step_create_container() {
 		sleep 2
 	fi
 
-	# Build the create command based on mode
+	# Build the create command (OAuth mode with both secrets)
 	local create_cmd="$DEVBOX_CLI create $TEST_CONTAINER_NAME $TEST_REPO"
 	create_cmd="$create_cmd --github-secret $GITHUB_SECRET_NAME"
+	create_cmd="$create_cmd --claude-code-secret $CLAUDE_SECRET_NAME"
 	create_cmd="$create_cmd --enable-docker --sudo nopass"
 
-	if [[ "$USE_OAUTH_MODE" == "1" ]]; then
-		create_cmd="$create_cmd --claude-code-secret $CLAUDE_SECRET_NAME"
-		log_info "Running: $create_cmd"
-	else
-		create_cmd="$create_cmd --bedrock"
-		log_info "Running: $create_cmd"
-	fi
+	log_info "Running: $create_cmd"
 
 	if eval "$create_cmd" 2>&1; then
 		CONTAINER_CREATED=true
@@ -413,21 +400,19 @@ main() {
 	echo "  CHECKPOINT 3 INTEGRATION TEST"
 	echo "============================================================================="
 	echo ""
-	if [[ "$USE_OAUTH_MODE" == "1" ]]; then
-		echo "  Mode: OAuth (requires GitHub + Claude tokens)"
-	else
-		echo "  Mode: Bedrock (requires only GitHub token)"
-	fi
+	echo "  Mode: OAuth (requires GitHub + Claude tokens)"
 	echo ""
 	echo "This test validates the complete devbox workflow using SECRETS:"
 	echo "  1. Initialize devbox (build image, set up credentials)"
 	echo "  2. Verify secrets (secure file-based storage)"
-	echo "  3. Create container with --github-secret --enable-docker --sudo nopass"
+	echo "  3. Create container with --github-secret --claude-code-secret"
 	echo "  4. Attach to container, wait for nix develop"
 	echo "  5. Run test suite (pre-commit, git fetch, docker ps, claude)"
 	echo "  6. Exit cleanly"
 	echo ""
-	echo "To run in OAuth mode: USE_OAUTH_MODE=1 $0"
+	echo "Required secrets:"
+	echo "  - GitHub token: devbox secrets add $GITHUB_SECRET_NAME --from-env GITHUB_TOKEN"
+	echo "  - Claude token: devbox secrets add $CLAUDE_SECRET_NAME --from-env CLAUDE_CODE_OAUTH_TOKEN"
 	echo ""
 
 	check_prerequisites
