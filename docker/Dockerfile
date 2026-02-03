@@ -9,9 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with UID 1000
+# Note: sudo access is NOT granted by default for security
+# Use --sudo flag with devbox create to enable sudo if needed
 RUN groupadd -g 1000 devbox 2>/dev/null || true && \
-    useradd -u 1000 -g 1000 -m -s /bin/bash devbox && \
-    echo "devbox ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    useradd -u 1000 -g 1000 -m -s /bin/bash devbox
 
 # Install Nix as devbox user (single-user mode)
 USER devbox
@@ -21,11 +22,15 @@ WORKDIR /home/devbox
 RUN mkdir -p /home/devbox/.config/nix && \
     echo "experimental-features = nix-command flakes" > /home/devbox/.config/nix/nix.conf
 
-# Install Nix (single-user, no daemon)
-RUN curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
+# Install Nix using Determinate Systems installer (more reliable, requires root)
+USER root
+RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | \
+    sh -s -- install linux --no-confirm --init none && \
+    chown -R devbox:devbox /nix
+USER devbox
 
-# Ensure Nix is in PATH
-ENV PATH="/home/devbox/.nix-profile/bin:$PATH"
+# Ensure Nix is in PATH (Determinate Systems installs to /nix/var/nix/profiles/default/bin)
+ENV PATH="/nix/var/nix/profiles/default/bin:/home/devbox/.nix-profile/bin:$PATH"
 
 # Switch to root for Docker installation
 USER root

@@ -135,6 +135,8 @@ CREATE OPTIONS:
     --secret <name>        Use stored secret for GITHUB_TOKEN
     --bedrock              Use AWS Bedrock for Claude (sets CLAUDE_CODE_USE_BEDROCK=1)
     --aws-profile <profile>  AWS profile name
+    --enable-docker        Enable Docker-in-Docker functionality
+    --sudo <mode>          Enable sudo: nopass (passwordless) or password
 
 RM OPTIONS:
     --force                Force remove a running container
@@ -417,6 +419,9 @@ cmd_create() {
 	local aws_profile=""
 	local dry_run=false
 	local secrets=()
+	local enable_docker=false
+	local sudo_mode=""
+	local sudo_password_hash=""
 
 	# Parse arguments and flags
 	while [[ $# -gt 0 ]]; do
@@ -453,6 +458,22 @@ cmd_create() {
 			dry_run=true
 			shift
 			;;
+		--enable-docker)
+			enable_docker=true
+			shift
+			;;
+		--sudo)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires an argument (nopass|password)"
+				return 1
+			fi
+			if [[ "$2" != "nopass" ]] && [[ "$2" != "password" ]]; then
+				log_error "Invalid sudo mode: $2 (must be 'nopass' or 'password')"
+				return 1
+			fi
+			sudo_mode="$2"
+			shift 2
+			;;
 		--help | -h)
 			cat <<EOF
 devbox create - Create and start a new container instance
@@ -470,6 +491,8 @@ OPTIONS:
                            First secret named 'github-token' is used for GitHub auth
     --bedrock              Use AWS Bedrock for Claude (sets CLAUDE_CODE_USE_BEDROCK=1)
     --aws-profile <profile>  AWS profile name
+    --enable-docker        Enable Docker-in-Docker functionality (requires elevated privileges)
+    --sudo <mode>          Enable sudo access: nopass (passwordless) or password (with password)
     --help, -h             Show this help message
 
 ENVIRONMENT:
@@ -493,11 +516,20 @@ DESCRIPTION:
       devbox secrets add github-token --from-env GITHUB_TOKEN
 
 EXAMPLES:
-    # Using stored secret (recommended - secure file injection)
+    # Basic container (no Docker, no sudo)
     devbox create myapp org/repo --secret github-token
 
-    # Multiple secrets
-    devbox create myapp org/repo --secret github-token --secret npm-token
+    # With Docker-in-Docker enabled
+    devbox create myapp org/repo --secret github-token --enable-docker
+
+    # With passwordless sudo
+    devbox create myapp org/repo --secret github-token --sudo nopass
+
+    # With password-protected sudo (prompts for password)
+    devbox create myapp org/repo --secret github-token --sudo password
+
+    # Full-featured container with Docker and sudo
+    devbox create myapp org/repo --secret github-token --enable-docker --sudo nopass
 
     # With port mapping
     devbox create webapp org/webapp --secret github-token --port 3000:3000
@@ -635,6 +667,33 @@ EOF
 		return 1
 	fi
 
+	# Handle sudo password mode - prompt for password and generate hash
+	if [[ "$sudo_mode" == "password" ]]; then
+		echo -n "Enter sudo password for devbox user: "
+		read -rs sudo_password
+		echo
+		echo -n "Confirm password: "
+		read -rs sudo_password_confirm
+		echo
+
+		if [[ "$sudo_password" != "$sudo_password_confirm" ]]; then
+			log_error "Passwords do not match"
+			return 1
+		fi
+
+		if [[ -z "$sudo_password" ]]; then
+			log_error "Password cannot be empty"
+			return 1
+		fi
+
+		# Generate password hash using openssl (SHA-512)
+		sudo_password_hash=$(openssl passwd -6 "$sudo_password")
+
+		# Clear password from memory (best effort)
+		sudo_password=""
+		sudo_password_confirm=""
+	fi
+
 	# Check for existing container with same name
 	local full_container_name="${CONTAINER_PREFIX}${container_name}"
 	if docker ps -aq --filter "name=^${full_container_name}$" | grep -q .; then
@@ -709,12 +768,27 @@ EOF
 		docker_cmd="$docker_cmd -v ${secrets_volume}:/run/secrets:ro"
 	fi
 
-	# Use Docker-in-Docker for security isolation
-	# This prevents container escape via host Docker socket
-	# (mounting host socket would allow: docker run -v /:/host ubuntu cat /host/etc/passwd)
-	docker_cmd="$docker_cmd --privileged"
-	docker_cmd="$docker_cmd -e DOCKER_TLS_CERTDIR="
-	docker_cmd="$docker_cmd -e DEVBOX_DOCKER_IN_DOCKER=true"
+	# Docker-in-Docker is opt-in via --enable-docker flag
+	# When enabled, uses minimal capabilities instead of --privileged for security
+	if [[ "$enable_docker" == true ]]; then
+		# Minimal capabilities required for Docker-in-Docker
+		docker_cmd="$docker_cmd --cap-add=SYS_ADMIN"
+		docker_cmd="$docker_cmd --cap-add=NET_ADMIN"
+		docker_cmd="$docker_cmd --cap-add=MKNOD"
+		docker_cmd="$docker_cmd --security-opt seccomp=unconfined"
+		docker_cmd="$docker_cmd --security-opt apparmor=unconfined"
+		docker_cmd="$docker_cmd --cgroupns=private"
+		docker_cmd="$docker_cmd -e DOCKER_TLS_CERTDIR="
+		docker_cmd="$docker_cmd -e DEVBOX_DOCKER_IN_DOCKER=true"
+	fi
+
+	# Sudo mode configuration (passed to entrypoint)
+	if [[ -n "$sudo_mode" ]]; then
+		docker_cmd="$docker_cmd -e DEVBOX_SUDO_MODE=$sudo_mode"
+		if [[ -n "$sudo_password_hash" ]]; then
+			docker_cmd="$docker_cmd -e DEVBOX_SUDO_PASSWORD_HASH=$sudo_password_hash"
+		fi
+	fi
 
 	docker_cmd="$docker_cmd $port_args"
 	docker_cmd="$docker_cmd $env_vars"
@@ -749,6 +823,16 @@ EOF
 		fi
 		if [[ "$bedrock_mode" == true ]]; then
 			echo "  Environment: CLAUDE_CODE_USE_BEDROCK=1"
+		fi
+		if [[ "$enable_docker" == true ]]; then
+			echo "  Docker-in-Docker: enabled"
+		else
+			echo "  Docker-in-Docker: disabled"
+		fi
+		if [[ -n "$sudo_mode" ]]; then
+			echo "  Sudo mode: $sudo_mode"
+		else
+			echo "  Sudo: disabled"
 		fi
 		# Show docker command (secrets paths are fine to show, values are in files)
 		echo "  Docker command: $docker_cmd"
@@ -806,6 +890,42 @@ EOF
 				"$DEVBOX_IMAGE" \
 				bash -c "$secrets_script"
 		fi
+	fi
+
+	# Configure sudo if needed (--enable-docker requires sudo for dockerd, --sudo for user access)
+	local sudoers_volume="${full_container_name}-sudoers"
+	if [[ "$enable_docker" == true ]] || [[ -n "$sudo_mode" ]]; then
+		local sudoers_script=""
+
+		# Determine sudoers configuration
+		if [[ "$sudo_mode" == "nopass" ]]; then
+			# Full passwordless sudo
+			sudoers_script="echo 'devbox ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/devbox"
+		elif [[ "$sudo_mode" == "password" ]]; then
+			# Password-protected sudo - also need to set the password
+			sudoers_script="echo 'devbox:$sudo_password_hash' | chpasswd -e && echo 'devbox ALL=(ALL) ALL' > /etc/sudoers.d/devbox"
+		elif [[ "$enable_docker" == true ]]; then
+			# Docker-only sudo (minimal permissions for DinD)
+			sudoers_script="echo 'devbox ALL=(ALL) NOPASSWD: /usr/bin/dockerd, /usr/bin/docker, /usr/bin/pkill, /bin/rm, /bin/chmod' > /etc/sudoers.d/devbox"
+		fi
+
+		sudoers_script="${sudoers_script} && chmod 440 /etc/sudoers.d/devbox && cp /etc/sudoers.d/devbox /sudoers-config/"
+
+		if declare -f with_spinner >/dev/null 2>&1; then
+			with_spinner "Setting up sudo configuration" \
+				"docker run --rm --user root --entrypoint '' -v '${sudoers_volume}:/sudoers-config' '$DEVBOX_IMAGE' bash -c \"$sudoers_script\""
+		else
+			log_info "Setting up sudo configuration..."
+			docker run --rm \
+				--user root \
+				--entrypoint '' \
+				-v "${sudoers_volume}:/sudoers-config" \
+				"$DEVBOX_IMAGE" \
+				bash -c "$sudoers_script"
+		fi
+
+		# Mount sudoers volume into container
+		docker_cmd="${docker_cmd/ $DEVBOX_IMAGE/ -v ${sudoers_volume}:/etc/sudoers.d:ro $DEVBOX_IMAGE}"
 	fi
 
 	# Create and start the container
@@ -1474,6 +1594,12 @@ EOF
 				if docker volume rm "$secrets_volume" >/dev/null 2>&1; then
 					log_info "Secrets volume removed for '$display_name'"
 				fi
+
+				# Remove sudoers volume if it exists
+				local sudoers_volume="${full_container_name}-sudoers"
+				if docker volume rm "$sudoers_volume" >/dev/null 2>&1; then
+					log_info "Sudoers volume removed for '$display_name'"
+				fi
 			else
 				log_error "Failed to remove container '$display_name'"
 				((failed_count++)) || true
@@ -1585,6 +1711,12 @@ EOF
 				local secrets_volume="${full_container_name}-secrets"
 				if docker volume rm "$secrets_volume" >/dev/null 2>&1; then
 					log_info "Secrets volume removed"
+				fi
+
+				# Remove sudoers volume if it exists
+				local sudoers_volume="${full_container_name}-sudoers"
+				if docker volume rm "$sudoers_volume" >/dev/null 2>&1; then
+					log_info "Sudoers volume removed"
 				fi
 			fi
 		else

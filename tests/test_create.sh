@@ -208,23 +208,65 @@ test_create_bedrock_mode() {
 	fi
 }
 
-test_create_uses_dind_for_security() {
+test_create_no_docker_by_default() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
-	# Verify Docker-in-Docker is always used for security isolation
-	# This prevents container escape via host Docker socket
-	if output=$("$DEVBOX_CLI" create test-dind "$TEST_REPO" --dry-run 2>&1); then
-		if [[ "$output" == *"--privileged"* ]] &&
-			[[ "$output" == *"DEVBOX_DOCKER_IN_DOCKER=true"* ]]; then
-			log_test "create always uses Docker-in-Docker for security"
+	# Docker-in-Docker should NOT be enabled by default for security
+	# This reduces the attack surface for containers that don't need Docker
+	if output=$("$DEVBOX_CLI" create test-no-docker "$TEST_REPO" --dry-run 2>&1); then
+		if [[ "$output" != *"--privileged"* ]] &&
+			[[ "$output" != *"DEVBOX_DOCKER_IN_DOCKER"* ]] &&
+			[[ "$output" != *"--cap-add"* ]] &&
+			[[ "$output" == *"Docker-in-Docker: disabled"* ]]; then
+			log_test "create does NOT enable Docker by default (security)"
 			TESTS_PASSED=$((TESTS_PASSED + 1))
 		else
-			log_fail "create must use Docker-in-Docker (--privileged and DEVBOX_DOCKER_IN_DOCKER=true)"
+			log_fail "create should NOT enable Docker by default"
 			echo "Output was: $output"
 		fi
 	else
 		log_fail "create failed in dry-run mode"
+	fi
+}
+
+test_create_enable_docker_flag() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# --enable-docker should add Docker capabilities (not --privileged)
+	if output=$("$DEVBOX_CLI" create test-with-docker "$TEST_REPO" --enable-docker --dry-run 2>&1); then
+		if [[ "$output" == *"--cap-add=SYS_ADMIN"* ]] &&
+			[[ "$output" == *"--cap-add=NET_ADMIN"* ]] &&
+			[[ "$output" == *"--cap-add=MKNOD"* ]] &&
+			[[ "$output" == *"DEVBOX_DOCKER_IN_DOCKER=true"* ]] &&
+			[[ "$output" == *"Docker-in-Docker: enabled"* ]]; then
+			log_test "create --enable-docker adds correct capabilities"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create --enable-docker missing required capabilities"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create --enable-docker failed in dry-run mode"
+	fi
+}
+
+test_create_no_privileged_flag() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# Even with --enable-docker, should NOT use --privileged (too broad)
+	if output=$("$DEVBOX_CLI" create test-no-priv "$TEST_REPO" --enable-docker --dry-run 2>&1); then
+		if [[ "$output" != *"--privileged"* ]]; then
+			log_test "create --enable-docker does NOT use --privileged (uses minimal capabilities)"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "SECURITY: --enable-docker should use minimal capabilities, not --privileged"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create --enable-docker failed in dry-run mode"
 	fi
 }
 
@@ -245,6 +287,120 @@ test_create_no_host_socket_mount() {
 		fi
 	else
 		log_fail "create failed in dry-run mode"
+	fi
+}
+
+test_create_no_sudo_by_default() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# Sudo should NOT be enabled by default
+	if output=$("$DEVBOX_CLI" create test-no-sudo "$TEST_REPO" --dry-run 2>&1); then
+		if [[ "$output" != *"DEVBOX_SUDO_MODE"* ]] &&
+			[[ "$output" == *"Sudo: disabled"* ]]; then
+			log_test "create does NOT enable sudo by default (security)"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create should NOT enable sudo by default"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create failed in dry-run mode"
+	fi
+}
+
+test_create_sudo_nopass() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	# --sudo nopass should enable passwordless sudo
+	if output=$("$DEVBOX_CLI" create test-sudo-nopass "$TEST_REPO" --sudo nopass --dry-run 2>&1); then
+		if [[ "$output" == *"DEVBOX_SUDO_MODE=nopass"* ]] &&
+			[[ "$output" == *"Sudo mode: nopass"* ]]; then
+			log_test "create --sudo nopass enables passwordless sudo"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create --sudo nopass missing sudo configuration"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create --sudo nopass failed in dry-run mode"
+	fi
+}
+
+test_create_sudo_invalid_mode() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output exit_code
+
+	# --sudo with invalid mode should fail
+	set +e
+	output=$("$DEVBOX_CLI" create test-sudo-invalid "$TEST_REPO" --sudo invalid 2>&1)
+	exit_code=$?
+	set -e
+
+	if [[ $exit_code -ne 0 ]] && [[ "$output" == *"Invalid sudo mode"* ]]; then
+		log_test "create --sudo rejects invalid mode"
+		TESTS_PASSED=$((TESTS_PASSED + 1))
+	else
+		log_fail "create --sudo should reject invalid mode"
+		echo "Exit code was: $exit_code"
+		echo "Output was: $output"
+	fi
+}
+
+test_create_sudo_missing_argument() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output exit_code
+
+	# --sudo without argument should fail
+	set +e
+	output=$("$DEVBOX_CLI" create test-sudo-noarg "$TEST_REPO" --sudo 2>&1)
+	exit_code=$?
+	set -e
+
+	if [[ $exit_code -ne 0 ]] && [[ "$output" == *"requires an argument"* ]]; then
+		log_test "create --sudo requires mode argument"
+		TESTS_PASSED=$((TESTS_PASSED + 1))
+	else
+		log_fail "create --sudo should require mode argument"
+		echo "Exit code was: $exit_code"
+		echo "Output was: $output"
+	fi
+}
+
+test_create_help_shows_security_flags() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	if output=$("$DEVBOX_CLI" create --help 2>&1); then
+		if [[ "$output" == *"--enable-docker"* ]] &&
+			[[ "$output" == *"--sudo"* ]]; then
+			log_test "create --help documents security flags"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create --help should document --enable-docker and --sudo flags"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create --help failed"
+	fi
+}
+
+test_entrypoint_no_tcp_socket() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local entrypoint_path="${SCRIPT_DIR}/../docker/entrypoint.sh"
+
+	# Verify entrypoint does NOT expose Docker on TCP socket (security vulnerability)
+	if [[ -f "$entrypoint_path" ]]; then
+		if grep -q "tcp://0.0.0.0:2375" "$entrypoint_path"; then
+			log_fail "SECURITY: entrypoint.sh should NOT expose Docker on TCP socket"
+			echo "Found TCP socket exposure in entrypoint.sh"
+		else
+			log_test "entrypoint.sh does NOT expose Docker TCP socket (security)"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		fi
+	else
+		log_fail "Could not find entrypoint.sh"
 	fi
 }
 
@@ -559,8 +715,21 @@ main() {
 	test_create_basic_container
 	test_create_with_ports
 	test_create_bedrock_mode
-	test_create_uses_dind_for_security
+
+	# Security tests - Docker isolation
+	test_create_no_docker_by_default
+	test_create_enable_docker_flag
+	test_create_no_privileged_flag
 	test_create_no_host_socket_mount
+	test_entrypoint_no_tcp_socket
+
+	# Security tests - Sudo configuration
+	test_create_no_sudo_by_default
+	test_create_sudo_nopass
+	test_create_sudo_invalid_mode
+	test_create_sudo_missing_argument
+	test_create_help_shows_security_flags
+
 	test_create_name_already_exists
 	test_create_complex_command
 

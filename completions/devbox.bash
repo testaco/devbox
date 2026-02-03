@@ -51,12 +51,12 @@ _devbox_completion() {
 
 	create)
 		# Check if we need container name, repo URL, or options
-		local create_opts="--port -p --secret --bedrock --aws-profile --help -h"
+		local create_opts="--port -p --secret --bedrock --aws-profile --enable-docker --sudo --help -h"
 
 		# Count non-option arguments after 'create'
 		local arg_count=0
 		for ((i = 2; i < cword; i++)); do
-			if [[ "${words[i]}" != -* ]] && [[ "${words[i - 1]}" != --port ]] && [[ "${words[i - 1]}" != -p ]] && [[ "${words[i - 1]}" != --aws-profile ]] && [[ "${words[i - 1]}" != --secret ]]; then
+			if [[ "${words[i]}" != -* ]] && [[ "${words[i - 1]}" != --port ]] && [[ "${words[i - 1]}" != -p ]] && [[ "${words[i - 1]}" != --aws-profile ]] && [[ "${words[i - 1]}" != --secret ]] && [[ "${words[i - 1]}" != --sudo ]]; then
 				((arg_count++))
 			fi
 		done
@@ -76,6 +76,10 @@ _devbox_completion() {
 				secrets_list=$(ls -1 "$secrets_dir" 2>/dev/null)
 				COMPREPLY=($(compgen -W "$secrets_list" -- "$cur"))
 			fi
+			return 0
+		elif [[ "$prev" == "--sudo" ]]; then
+			# Complete sudo modes
+			COMPREPLY=($(compgen -W "nopass password" -- "$cur"))
 			return 0
 		else
 			# Suggest flags
