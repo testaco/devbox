@@ -121,22 +121,41 @@ fi
 
 echo "Bootstrapping Nix environment..."
 
-# Source Nix profile
-if [ -f /home/devbox/.nix-profile/etc/profile.d/nix.sh ]; then
+# Source Nix profile (try both standard and Determinate Systems paths)
+if [ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+	source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+elif [ -f /home/devbox/.nix-profile/etc/profile.d/nix.sh ]; then
 	source /home/devbox/.nix-profile/etc/profile.d/nix.sh
 fi
 
-# Ensure Nix is in PATH
-export PATH="/home/devbox/.nix-profile/bin:$PATH"
+# Ensure Nix is in PATH (both possible locations)
+export PATH="/nix/var/nix/profiles/default/bin:/home/devbox/.nix-profile/bin:$PATH"
 export NIX_CONFIG="experimental-features = nix-command flakes"
 
 # ============================================================================
 # Step 5: Install gh via Nix
 # ============================================================================
 
-echo "Installing GitHub CLI via Nix..."
-nix profile install nixpkgs#gh
-echo "✓ GitHub CLI installed"
+# Install gh via Nix if available, otherwise warn
+if command -v nix >/dev/null 2>&1; then
+	echo "Installing GitHub CLI via Nix..."
+	nix profile install nixpkgs#gh
+	echo "✓ GitHub CLI installed"
+else
+	echo ""
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo "⚠️  WARNING: Nix is not available"
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo ""
+	echo "The Nix package manager was not found. This likely means"
+	echo "the Docker image was built with a Nix installation failure."
+	echo ""
+	echo "To fix, rebuild the Docker image:"
+	echo "  devbox init --force"
+	echo ""
+	echo "Continuing without Nix - gh and nix develop won't be available."
+	echo ""
+fi
 
 # ============================================================================
 # Step 6: Validate token and clone repository
@@ -150,6 +169,22 @@ if [ -z "$REPO" ]; then
 	echo ""
 	echo "Please provide a repository via DEVBOX_REPO environment variable:"
 	echo "  docker run -e DEVBOX_REPO=\"owner/repo\" ..."
+	echo ""
+	exit 1
+fi
+
+# Check if gh is available
+if ! command -v gh >/dev/null 2>&1; then
+	echo ""
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo "✗ ERROR: GitHub CLI (gh) is not available"
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo ""
+	echo "The gh command is required to clone repositories."
+	echo "This usually means the Nix installation failed."
+	echo ""
+	echo "To fix, rebuild the Docker image:"
+	echo "  devbox init --force"
 	echo ""
 	exit 1
 fi
@@ -187,6 +222,19 @@ cd "$REPO_DIR"
 # ============================================================================
 # Step 7: Enter development environment
 # ============================================================================
+
+# Check if Nix is available for the development environment
+if ! command -v nix >/dev/null 2>&1; then
+	echo ""
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo "⚠️  Nix is not available - using basic bash shell"
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	echo ""
+	echo "To fix, rebuild the Docker image:"
+	echo "  devbox init --force"
+	echo ""
+	exec bash
+fi
 
 if [ -f "flake.nix" ]; then
 	echo "Found flake.nix - entering Nix development environment..."

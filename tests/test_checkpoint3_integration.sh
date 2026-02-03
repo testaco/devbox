@@ -184,9 +184,9 @@ step_create_container() {
 		sleep 2
 	fi
 
-	log_info "Running: bin/devbox create --secret $SECRET_NAME $TEST_CONTAINER_NAME $TEST_REPO"
+	log_info "Running: bin/devbox create --secret $SECRET_NAME --enable-docker --sudo nopass $TEST_CONTAINER_NAME $TEST_REPO"
 
-	if "$DEVBOX_CLI" create --secret "$SECRET_NAME" "$TEST_CONTAINER_NAME" "$TEST_REPO" 2>&1; then
+	if "$DEVBOX_CLI" create --secret "$SECRET_NAME" --enable-docker --sudo nopass "$TEST_CONTAINER_NAME" "$TEST_REPO" 2>&1; then
 		CONTAINER_CREATED=true
 		log_success "Container '$TEST_CONTAINER_NAME' created successfully"
 	else
@@ -352,7 +352,7 @@ main() {
 	echo "This test validates the complete devbox workflow using SECRETS:"
 	echo "  1. Initialize devbox (build image, set up credentials)"
 	echo "  2. Verify GitHub token secret (secure file-based storage)"
-	echo "  3. Create container using --secret flag for $TEST_REPO"
+	echo "  3. Create container with --secret --enable-docker --sudo nopass for $TEST_REPO"
 	echo "  4. Attach to container, wait for nix develop"
 	echo "  5. Run test suite (pre-commit, git fetch, docker ps, claude)"
 	echo "  6. Exit cleanly"
