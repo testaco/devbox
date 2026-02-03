@@ -247,31 +247,50 @@ fi
 
 #### `devbox init`
 
-One-time setup. Authenticates GitHub CLI and Claude Code (if not using Bedrock), stores credentials in Docker volume.
+One-time setup. Sets up credential volumes for AWS and GitHub settings.
 
 ```bash
-devbox init
-devbox init --bedrock  # Skip Claude OAuth, only configure GitHub + AWS
+devbox init                  # Basic setup
+devbox init --bedrock        # Configure for Bedrock mode
+devbox init --import-aws     # Import AWS credentials from host
 ```
 
 Options:
 - `--import-aws` - Import existing AWS credentials from `~/.aws` on host
-- `--bedrock` - Configure for Bedrock mode (skips Claude OAuth)
+- `--bedrock` - Configure for Bedrock mode
+
+Note: Claude authentication is now handled via tokens, not during init. Users run `claude setup-token` externally and store the token as a devbox secret.
 
 #### `devbox create <name> <repo-url>`
 
 Create and start a new container instance.
 
 ```bash
-devbox create myproject git@github.com:org/repo.git
-devbox create myproject git@github.com:org/repo.git --port 3000:3000 --port 8080:8080
-devbox create myproject git@github.com:org/repo.git --bedrock --aws-profile bedrock-prod
+# OAuth mode (requires both secrets)
+devbox create myproject org/repo \
+  --github-secret github-token \
+  --claude-code-secret claude-oauth-token
+
+# Bedrock mode (only github secret needed)
+devbox create myproject org/repo \
+  --github-secret github-token \
+  --bedrock --aws-profile prod
+
+# With port mapping
+devbox create myproject org/repo \
+  --github-secret github-token \
+  --claude-code-secret claude-oauth-token \
+  --port 3000:3000 --port 8080:8080
 ```
 
 Options:
+- `--github-secret <name>` - GitHub token secret (required)
+- `--claude-code-secret <name>` - Claude Code OAuth token secret (required for non-Bedrock mode)
 - `--port, -p <host:container>` - Port mapping (repeatable)
 - `--bedrock` - Use AWS Bedrock for Claude (sets `CLAUDE_CODE_USE_BEDROCK=1`)
-- `--aws-profile <profile>` - AWS profile name (required with `--bedrock`)
+- `--aws-profile <profile>` - AWS profile name
+- `--enable-docker` - Enable Docker-in-Docker functionality
+- `--sudo <mode>` - Enable sudo access: `nopass` or `password`
 
 #### `devbox list`
 
@@ -479,7 +498,7 @@ pkgs.mkShell {
 
 ## Open Questions (Resolved)
 
-1. **Claude Code credential storage** - ✅ Resolved. On Linux, credentials are stored in `~/.claude/.credentials.json`. On macOS, they go to Keychain (which is why bind mounts from macOS don't work). Running init inside a Linux container solves this.
+1. **Claude Code credential storage** - ✅ Resolved. Now using `CLAUDE_CODE_OAUTH_TOKEN` environment variable set at runtime inside container. Users get tokens via `claude setup-token` and store as devbox secrets.
 
 2. **Claude Code installation** - ✅ Resolved. Anthropic says npm is "deprecated" but it still works. Use `npm install -g @anthropic-ai/claude-code`. Requires Node.js 18+.
 
@@ -487,7 +506,7 @@ pkgs.mkShell {
 
 4. **Nix in Docker** - Needs testing. Determinate Systems installer should work, but may need adjustments for containerized use.
 
-5. **Token refresh** - Claude OAuth tokens have `expiresAt` and `refreshToken` fields. Claude Code handles refresh automatically. If tokens become invalid, user needs to re-run `devbox init`.
+5. **Token refresh** - Users must manually refresh tokens via `claude setup-token` when they expire. Update the secret with `devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN --force`.
 
 ---
 
@@ -510,19 +529,24 @@ devbox/
 
 ## Example Session
 
+### Bedrock Mode (AWS Claude access)
+
 ```bash
-# First-time setup (Bedrock mode - skip Claude OAuth)
+# First-time setup
 $ devbox init --bedrock --import-aws
 Creating credentials volume...
-Starting GitHub CLI authentication...
-  → Opening browser for GitHub OAuth...
-  ✓ Authenticated as @chrissmith
 Importing AWS credentials from ~/.aws...
   ✓ Imported 3 profiles: default, bedrock-prod, bedrock-dev
 Initialization complete (Bedrock mode).
 
+# Store GitHub token as secret (one-time)
+$ export GITHUB_TOKEN="ghp_xxx..."
+$ devbox secrets add github-token --from-env GITHUB_TOKEN
+✓ Secret 'github-token' added
+
 # Create a new development container
-$ devbox create mapquest git@github.com:system1/mapquest.git \
+$ devbox create mapquest system1/mapquest \
+    --github-secret github-token \
     --port 3000:3000 \
     --bedrock \
     --aws-profile bedrock-prod
@@ -532,8 +556,8 @@ Container 'mapquest' (f8a3b2c1) created and running.
 
 # List containers
 $ devbox list
-NAME       ID         STATUS    REPO                                PORTS       MODE
-mapquest   f8a3b2c1   running   git@github.com:system1/mapquest     3000:3000   bedrock
+NAME       ID         STATUS    REPO                PORTS       MODE
+mapquest   f8a3b2c1   running   system1/mapquest    3000:3000   bedrock
 
 # Attach to container
 $ devbox attach mapquest
@@ -552,20 +576,28 @@ $ devbox stop mapquest
 $ devbox rm mapquest
 ```
 
-### Alternative: OAuth Mode (Claude Pro/Max subscription)
+### OAuth Mode (Claude Pro/Max subscription)
 
 ```bash
-# First-time setup (OAuth mode)
+# First-time setup
 $ devbox init
 Creating credentials volume...
-Starting GitHub CLI authentication...
-  → Opening browser for GitHub OAuth...
-  ✓ Authenticated as @chrissmith
-Starting Claude Code authentication...
-  → Opening browser for Claude OAuth...
-  ✓ Authenticated
 Initialization complete.
 
-# Create container (no --bedrock flag)
-$ devbox create myproject git@github.com:org/repo.git --port 3000:3000
+# Store GitHub token as secret (one-time)
+$ export GITHUB_TOKEN="ghp_xxx..."
+$ devbox secrets add github-token --from-env GITHUB_TOKEN
+✓ Secret 'github-token' added
+
+# Get Claude Code OAuth token (one-time)
+$ claude setup-token
+# Follow prompts to get token, then:
+$ devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN
+✓ Secret 'claude-oauth-token' added
+
+# Create container (requires both secrets)
+$ devbox create myproject org/repo \
+    --github-secret github-token \
+    --claude-code-secret claude-oauth-token \
+    --port 3000:3000
 ```

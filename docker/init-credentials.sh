@@ -19,19 +19,8 @@ export CLAUDE_CONFIG_DIR=/devbox-credentials/claude
 export AWS_CONFIG_FILE=/devbox-credentials/aws/config
 export AWS_SHARED_CREDENTIALS_FILE=/devbox-credentials/aws/credentials
 
-# Claude configuration import (before authentication)
-echo "=== Checking Claude Configuration ==="
-# Check if credentials already exist (may have been copied as root earlier)
-if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
-	echo "✓ Claude credentials already present"
-	ls -la /devbox-credentials/claude/.credentials.json
-elif [[ -f /host-claude/.credentials.json ]]; then
-	echo "Copying Claude credentials from host..."
-	cp /host-claude/.credentials.json /devbox-credentials/claude/.credentials.json 2>/dev/null || {
-		echo "Note: Credentials will be imported by root process"
-	}
-fi
-
+# Claude settings import (not credentials - those are now via CLAUDE_CODE_OAUTH_TOKEN)
+echo "=== Checking Claude Settings ==="
 if [[ -f /devbox-credentials/claude/settings.json ]]; then
 	echo "✓ Claude settings already present"
 elif [[ -f /host-claude/settings.json ]]; then
@@ -41,34 +30,15 @@ elif [[ -f /host-claude/settings.json ]]; then
 	}
 fi
 
-# Claude authentication (only if not in Bedrock mode)
+# Note: Claude OAuth authentication is no longer performed during init
+# Users now provide an OAuth token via 'claude setup-token' stored as a devbox secret
 if [[ "${BEDROCK_MODE:-false}" != "true" ]]; then
-	# Check if credentials were already imported from host
-	if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
-		echo "=== Claude Code Authentication ==="
-		echo "✓ Claude credentials already imported from host system"
-	else
-		echo "=== Claude Code Authentication ==="
-		echo "Please authenticate with Claude Code..."
-		echo "This will open a browser window for OAuth authentication."
-
-		# Claude Code authentication - just run claude to trigger OAuth flow
-		claude --version >/dev/null || {
-			echo "Starting Claude Code authentication..."
-			# Claude Code will handle the OAuth flow when first run
-			claude || {
-				echo "✗ Claude Code authentication failed"
-				exit 1
-			}
-		}
-
-		if [[ -f /devbox-credentials/claude/.credentials.json ]]; then
-			echo "✓ Claude Code authentication successful"
-		else
-			echo "✗ Claude Code authentication failed - no credentials file found"
-			exit 1
-		fi
-	fi
+	echo "=== Claude Code Setup ==="
+	echo "Note: Claude authentication is now token-based, not OAuth-during-init."
+	echo "To authenticate Claude Code in containers:"
+	echo "  1. Run 'claude setup-token' on your host machine"
+	echo "  2. Store the token: devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN"
+	echo "  3. Create containers with: --claude-code-secret claude-oauth-token"
 else
 	echo "=== Skipping Claude OAuth (Bedrock mode) ==="
 	echo "AWS Bedrock mode enabled - Claude authentication will use AWS credentials"
@@ -184,8 +154,12 @@ echo "✓ Devbox initialization completed successfully!"
 echo ""
 if [[ "${BEDROCK_MODE:-false}" == "true" ]]; then
 	echo "Mode: AWS Bedrock"
-	echo "Authentication: GitHub CLI + AWS credentials"
+	echo "Authentication: GitHub token (secret) + AWS credentials"
 else
-	echo "Mode: Claude OAuth"
-	echo "Authentication: GitHub CLI + Claude OAuth"
+	echo "Mode: Token-based OAuth"
+	echo "Authentication: GitHub token (secret) + Claude OAuth token (secret)"
+	echo ""
+	echo "Next steps for OAuth mode containers:"
+	echo "  1. Get Claude token: claude setup-token"
+	echo "  2. Store it: devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN"
 fi

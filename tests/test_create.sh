@@ -91,6 +91,8 @@ test_create_help() {
 	if output=$("$DEVBOX_CLI" create --help 2>&1); then
 		if [[ "$output" == *"Create and start a new container instance"* ]] &&
 			[[ "$output" == *"--port"* ]] &&
+			[[ "$output" == *"--github-secret"* ]] &&
+			[[ "$output" == *"--claude-code-secret"* ]] &&
 			[[ "$output" == *"--bedrock"* ]] &&
 			[[ "$output" == *"--aws-profile"* ]]; then
 			log_test "create --help shows correct help text with options"
@@ -156,7 +158,12 @@ test_create_basic_container() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
-	if output=$("$DEVBOX_CLI" create test-basic "$TEST_REPO" --dry-run 2>&1); then
+	setup_oauth_secrets
+
+	if output=$("$DEVBOX_CLI" create test-basic "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1); then
 		if [[ "$output" == *"Would create container"* ]] &&
 			[[ "$output" == *"test-basic"* ]] &&
 			[[ "$output" == *"$TEST_REPO"* ]]; then
@@ -168,14 +175,22 @@ test_create_basic_container() {
 		fi
 	else
 		log_fail "create basic container failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_with_ports() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
-	if output=$("$DEVBOX_CLI" create test-ports "$TEST_REPO" --port 3000:3000 --port 8080:80 --dry-run 2>&1); then
+	setup_oauth_secrets
+
+	if output=$("$DEVBOX_CLI" create test-ports "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--port 3000:3000 --port 8080:80 --dry-run 2>&1); then
 		if [[ "$output" == *"3000:3000"* ]] &&
 			[[ "$output" == *"8080:80"* ]]; then
 			log_test "create with multiple ports shows correct port mappings"
@@ -186,14 +201,21 @@ test_create_with_ports() {
 		fi
 	else
 		log_fail "create with ports failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_bedrock_mode() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
-	if output=$("$DEVBOX_CLI" create test-bedrock "$TEST_REPO" --bedrock --aws-profile prod --dry-run 2>&1); then
+	setup_bedrock_secrets
+
+	if output=$("$DEVBOX_CLI" create test-bedrock "$TEST_REPO" \
+		--github-secret github-token \
+		--bedrock --aws-profile prod --dry-run 2>&1); then
 		if [[ "$output" == *"bedrock"* ]] &&
 			[[ "$output" == *"AWS Profile: prod"* ]] &&
 			[[ "$output" == *"CLAUDE_CODE_USE_BEDROCK=1"* ]]; then
@@ -205,16 +227,24 @@ test_create_bedrock_mode() {
 		fi
 	else
 		log_fail "create bedrock mode failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_no_docker_by_default() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
+	setup_oauth_secrets
+
 	# Docker-in-Docker should NOT be enabled by default for security
 	# This reduces the attack surface for containers that don't need Docker
-	if output=$("$DEVBOX_CLI" create test-no-docker "$TEST_REPO" --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-no-docker "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1); then
 		if [[ "$output" != *"--privileged"* ]] &&
 			[[ "$output" != *"DEVBOX_DOCKER_IN_DOCKER"* ]] &&
 			[[ "$output" != *"--cap-add"* ]] &&
@@ -227,15 +257,23 @@ test_create_no_docker_by_default() {
 		fi
 	else
 		log_fail "create failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_enable_docker_flag() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
+	setup_oauth_secrets
+
 	# --enable-docker should add Docker capabilities (not --privileged)
-	if output=$("$DEVBOX_CLI" create test-with-docker "$TEST_REPO" --enable-docker --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-with-docker "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--enable-docker --dry-run 2>&1); then
 		if [[ "$output" == *"--cap-add=SYS_ADMIN"* ]] &&
 			[[ "$output" == *"--cap-add=NET_ADMIN"* ]] &&
 			[[ "$output" == *"--cap-add=MKNOD"* ]] &&
@@ -249,15 +287,23 @@ test_create_enable_docker_flag() {
 		fi
 	else
 		log_fail "create --enable-docker failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_no_privileged_flag() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
+	setup_oauth_secrets
+
 	# Even with --enable-docker, should NOT use --privileged (too broad)
-	if output=$("$DEVBOX_CLI" create test-no-priv "$TEST_REPO" --enable-docker --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-no-priv "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--enable-docker --dry-run 2>&1); then
 		if [[ "$output" != *"--privileged"* ]]; then
 			log_test "create --enable-docker does NOT use --privileged (uses minimal capabilities)"
 			TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -267,15 +313,23 @@ test_create_no_privileged_flag() {
 		fi
 	else
 		log_fail "create --enable-docker failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_no_host_socket_mount() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
+	setup_oauth_secrets
+
 	# Verify host Docker socket is NOT mounted (security vulnerability)
-	if output=$("$DEVBOX_CLI" create test-no-socket "$TEST_REPO" --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-no-socket "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1); then
 		if [[ "$output" != *"/var/run/docker.sock:/var/run/docker.sock"* ]] &&
 			[[ "$output" != *"docker.sock:/var/run/docker.sock"* ]]; then
 			log_test "create does NOT mount host Docker socket (security)"
@@ -287,15 +341,23 @@ test_create_no_host_socket_mount() {
 		fi
 	else
 		log_fail "create failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_no_sudo_by_default() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
+	setup_oauth_secrets
+
 	# Sudo should NOT be enabled by default
-	if output=$("$DEVBOX_CLI" create test-no-sudo "$TEST_REPO" --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-no-sudo "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1); then
 		if [[ "$output" != *"DEVBOX_SUDO_MODE"* ]] &&
 			[[ "$output" == *"Sudo: disabled"* ]]; then
 			log_test "create does NOT enable sudo by default (security)"
@@ -306,15 +368,23 @@ test_create_no_sudo_by_default() {
 		fi
 	else
 		log_fail "create failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_sudo_nopass() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
+	setup_oauth_secrets
+
 	# --sudo nopass should enable passwordless sudo
-	if output=$("$DEVBOX_CLI" create test-sudo-nopass "$TEST_REPO" --sudo nopass --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-sudo-nopass "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--sudo nopass --dry-run 2>&1); then
 		if [[ "$output" == *"DEVBOX_SUDO_MODE=nopass"* ]] &&
 			[[ "$output" == *"Sudo mode: nopass"* ]]; then
 			log_test "create --sudo nopass enables passwordless sudo"
@@ -325,7 +395,10 @@ test_create_sudo_nopass() {
 		fi
 	else
 		log_fail "create --sudo nopass failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_sudo_invalid_mode() {
@@ -408,13 +481,18 @@ test_create_name_already_exists() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output exit_code
 
+	setup_oauth_secrets
+
 	# First create a container with alpine to avoid entrypoint issues
 	local container_id
 	container_id=$(docker run -d --name devbox-test-existing alpine sleep 3600)
 	CLEANUP_CONTAINERS+=("$container_id")
 
 	# Try to create another container with the same name (using dry-run to avoid token issues)
-	output=$("$DEVBOX_CLI" create existing "$TEST_REPO" --dry-run 2>&1) || exit_code=$?
+	output=$("$DEVBOX_CLI" create existing "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1) || exit_code=$?
 
 	if [[ $exit_code -ne 0 ]] && [[ "$output" == *"already exists"* ]]; then
 		log_test "create rejects duplicate container names"
@@ -424,13 +502,18 @@ test_create_name_already_exists() {
 		echo "Output was: $output"
 		echo "Exit code was: ${exit_code:-0}"
 	fi
+
+	cleanup_test_secrets
 }
 
 test_create_complex_command() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
+	setup_bedrock_secrets
+
 	if output=$("$DEVBOX_CLI" create test-complex "$TEST_REPO" \
+		--github-secret github-token \
 		--port 3000:3000 \
 		--port 8080:80 \
 		--port 9000:9000 \
@@ -451,7 +534,10 @@ test_create_complex_command() {
 		fi
 	else
 		log_fail "create with complex flags failed in dry-run mode"
+		echo "Output was: $output"
 	fi
+
+	cleanup_test_secrets
 }
 
 # ============================================================================
@@ -466,6 +552,22 @@ setup_test_secrets() {
 	chmod 700 "$TEST_SECRETS_DIR"
 }
 
+# Setup both GitHub and Claude secrets for OAuth mode tests
+setup_oauth_secrets() {
+	setup_test_secrets
+	echo "test_github_token_12345" >"$TEST_SECRETS_DIR/github-token"
+	echo "test_claude_oauth_token" >"$TEST_SECRETS_DIR/claude-oauth-token"
+	chmod 600 "$TEST_SECRETS_DIR/github-token"
+	chmod 600 "$TEST_SECRETS_DIR/claude-oauth-token"
+}
+
+# Setup only GitHub secret for Bedrock mode tests
+setup_bedrock_secrets() {
+	setup_test_secrets
+	echo "test_github_token_12345" >"$TEST_SECRETS_DIR/github-token"
+	chmod 600 "$TEST_SECRETS_DIR/github-token"
+}
+
 # Cleanup test secrets
 cleanup_test_secrets() {
 	if [[ -n "${TEST_SECRETS_DIR:-}" ]] && [[ -d "$TEST_SECRETS_DIR" ]]; then
@@ -473,60 +575,43 @@ cleanup_test_secrets() {
 	fi
 }
 
-test_create_with_secret_flag() {
+test_create_with_github_secret() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
-	# Setup test secrets directory
-	setup_test_secrets
+	setup_oauth_secrets
 
-	# Create a test secret
-	echo "test_github_token_12345" >"$TEST_SECRETS_DIR/github-token"
-	chmod 600 "$TEST_SECRETS_DIR/github-token"
-
-	# Unset GITHUB_TOKEN to force using the secret
-	local saved_token="${GITHUB_TOKEN:-}"
-	unset GITHUB_TOKEN
-
-	if output=$("$DEVBOX_CLI" create test-secret "$TEST_REPO" --secret github-token --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-secret "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1); then
 		if [[ "$output" == *"Would create container"* ]] &&
 			[[ "$output" == *"Secrets (mounted to /run/secrets)"* ]] &&
-			[[ "$output" == *"github-token"* ]]; then
-			log_test "create --secret flag shows secret in dry-run"
+			[[ "$output" == *"github_token"* ]]; then
+			log_test "create --github-secret flag shows secret in dry-run"
 			TESTS_PASSED=$((TESTS_PASSED + 1))
 		else
-			log_fail "create --secret flag missing expected content"
+			log_fail "create --github-secret flag missing expected content"
 			echo "Output was: $output"
 		fi
 	else
-		log_fail "create --secret flag failed in dry-run mode"
+		log_fail "create --github-secret flag failed in dry-run mode"
 		echo "Output was: $output"
 	fi
 
-	# Restore environment
-	if [[ -n "$saved_token" ]]; then
-		export GITHUB_TOKEN="$saved_token"
-	fi
 	cleanup_test_secrets
 }
 
-test_create_secret_not_in_env_vars() {
+test_create_secrets_not_in_env_vars() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
-	# Setup test secrets directory
-	setup_test_secrets
+	setup_oauth_secrets
 
-	# Create a test secret with a unique value we can search for
-	local secret_value="SUPER_SECRET_TOKEN_SHOULD_NOT_APPEAR"
-	echo "$secret_value" >"$TEST_SECRETS_DIR/github-token"
-	chmod 600 "$TEST_SECRETS_DIR/github-token"
-
-	# Unset GITHUB_TOKEN to force using the secret
-	local saved_token="${GITHUB_TOKEN:-}"
-	unset GITHUB_TOKEN
-
-	if output=$("$DEVBOX_CLI" create test-secret-secure "$TEST_REPO" --secret github-token --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-secret-secure "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1); then
 		# The docker command should NOT contain GITHUB_TOKEN as env var
 		# It should use volume mount to /run/secrets instead
 		# Check that there's no "-e GITHUB_TOKEN=" pattern (even masked)
@@ -535,150 +620,184 @@ test_create_secret_not_in_env_vars() {
 			echo "SECURITY ISSUE: Secret passed as environment variable (visible in docker inspect)"
 			echo "Output was: $output"
 		elif [[ "$output" == *"/run/secrets"* ]]; then
-			log_test "create --secret uses secure file mount instead of environment variable"
+			log_test "create uses secure file mount instead of environment variable"
 			TESTS_PASSED=$((TESTS_PASSED + 1))
 		else
 			log_fail "Expected /run/secrets volume mount for secure secret handling"
 			echo "Output was: $output"
 		fi
 	else
-		log_fail "create --secret failed in dry-run mode"
+		log_fail "create failed in dry-run mode"
 		echo "Output was: $output"
 	fi
 
-	# Restore environment
-	if [[ -n "$saved_token" ]]; then
-		export GITHUB_TOKEN="$saved_token"
-	fi
 	cleanup_test_secrets
 }
 
-test_create_multiple_secrets() {
+test_create_both_secrets_shown() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
-	# Setup test secrets directory
-	setup_test_secrets
+	setup_oauth_secrets
 
-	# Create multiple test secrets
-	echo "github_token_value" >"$TEST_SECRETS_DIR/github-token"
-	echo "npm_token_value" >"$TEST_SECRETS_DIR/npm-token"
-	echo "custom_api_key" >"$TEST_SECRETS_DIR/api-key"
-	chmod 600 "$TEST_SECRETS_DIR/github-token"
-	chmod 600 "$TEST_SECRETS_DIR/npm-token"
-	chmod 600 "$TEST_SECRETS_DIR/api-key"
-
-	# Unset GITHUB_TOKEN to force using secrets
-	local saved_token="${GITHUB_TOKEN:-}"
-	unset GITHUB_TOKEN
-
-	if output=$("$DEVBOX_CLI" create test-multi-secret "$TEST_REPO" \
-		--secret github-token \
-		--secret npm-token \
-		--secret api-key \
+	if output=$("$DEVBOX_CLI" create test-both-secrets "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
 		--dry-run 2>&1); then
-		# Should mention all secrets
-		if [[ "$output" == *"github-token"* ]] &&
-			[[ "$output" == *"npm-token"* ]] &&
-			[[ "$output" == *"api-key"* ]]; then
-			log_test "create with multiple --secret flags shows all secrets"
+		# Should mention both secrets
+		if [[ "$output" == *"github_token"* ]] &&
+			[[ "$output" == *"claude_code_token"* ]]; then
+			log_test "create shows both github and claude secrets"
 			TESTS_PASSED=$((TESTS_PASSED + 1))
 		else
-			log_fail "create with multiple secrets missing some secret references"
+			log_fail "create missing some secret references"
 			echo "Output was: $output"
 		fi
 	else
-		log_fail "create with multiple secrets failed in dry-run mode"
+		log_fail "create with both secrets failed in dry-run mode"
 		echo "Output was: $output"
 	fi
 
-	# Restore environment
-	if [[ -n "$saved_token" ]]; then
-		export GITHUB_TOKEN="$saved_token"
-	fi
 	cleanup_test_secrets
 }
 
-test_create_secret_not_found() {
+test_create_missing_claude_secret_oauth_mode() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output exit_code
+
+	setup_bedrock_secrets # Only sets up github-token, not claude-oauth-token
+
+	set +e
+	output=$("$DEVBOX_CLI" create test-missing-claude "$TEST_REPO" \
+		--github-secret github-token \
+		--dry-run 2>&1)
+	exit_code=$?
+	set -e
+
+	if [[ $exit_code -ne 0 ]] && [[ "$output" == *"Claude Code secret is required"* ]]; then
+		log_test "create requires --claude-code-secret in OAuth mode"
+		TESTS_PASSED=$((TESTS_PASSED + 1))
+	else
+		log_fail "create should require Claude secret in OAuth mode"
+		echo "Output was: $output"
+		echo "Exit code was: $exit_code"
+	fi
+
+	cleanup_test_secrets
+}
+
+test_create_bedrock_no_claude_secret() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output
+
+	setup_bedrock_secrets # Only github-token
+
+	# Bedrock mode should NOT require claude-code-secret
+	if output=$("$DEVBOX_CLI" create test-bedrock-only "$TEST_REPO" \
+		--github-secret github-token \
+		--bedrock \
+		--dry-run 2>&1); then
+		if [[ "$output" == *"Would create container"* ]] &&
+			[[ "$output" == *"Mode: bedrock"* ]] &&
+			[[ "$output" != *"claude_code_token"* ]]; then
+			log_test "create bedrock mode works without --claude-code-secret"
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		else
+			log_fail "create bedrock mode unexpected output"
+			echo "Output was: $output"
+		fi
+	else
+		log_fail "create bedrock mode failed in dry-run mode"
+		echo "Output was: $output"
+	fi
+
+	cleanup_test_secrets
+}
+
+test_create_github_secret_not_found() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output exit_code
 
 	# Setup empty test secrets directory
 	setup_test_secrets
 
-	# Unset GITHUB_TOKEN to force using secrets
-	local saved_token="${GITHUB_TOKEN:-}"
-	unset GITHUB_TOKEN
-
 	set +e
-	output=$("$DEVBOX_CLI" create test-nosecret "$TEST_REPO" --secret nonexistent-secret --dry-run 2>&1)
+	output=$("$DEVBOX_CLI" create test-nosecret "$TEST_REPO" \
+		--github-secret nonexistent-secret \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1)
 	exit_code=$?
 	set -e
 
 	if [[ $exit_code -ne 0 ]] && [[ "$output" == *"not found"* ]]; then
-		log_test "create --secret with nonexistent secret shows appropriate error"
+		log_test "create --github-secret with nonexistent secret shows appropriate error"
 		TESTS_PASSED=$((TESTS_PASSED + 1))
 	else
-		log_fail "create --secret should fail when secret doesn't exist"
+		log_fail "create --github-secret should fail when secret doesn't exist"
 		echo "Output was: $output"
 		echo "Exit code was: $exit_code"
 	fi
 
-	# Restore environment
-	if [[ -n "$saved_token" ]]; then
-		export GITHUB_TOKEN="$saved_token"
-	fi
 	cleanup_test_secrets
+}
+
+test_create_missing_github_secret() {
+	TESTS_RUN=$((TESTS_RUN + 1))
+	local output exit_code
+
+	set +e
+	output=$("$DEVBOX_CLI" create test-no-github "$TEST_REPO" --dry-run 2>&1)
+	exit_code=$?
+	set -e
+
+	if [[ $exit_code -ne 0 ]] && [[ "$output" == *"GitHub secret is required"* ]]; then
+		log_test "create requires --github-secret flag"
+		TESTS_PASSED=$((TESTS_PASSED + 1))
+	else
+		log_fail "create should require --github-secret flag"
+		echo "Output was: $output"
+		echo "Exit code was: $exit_code"
+	fi
 }
 
 test_create_secret_mount_path() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
-	# Setup test secrets directory
-	setup_test_secrets
+	setup_oauth_secrets
 
-	# Create a test secret
-	echo "test_token" >"$TEST_SECRETS_DIR/github-token"
-	chmod 600 "$TEST_SECRETS_DIR/github-token"
-
-	# Unset GITHUB_TOKEN to force using secrets
-	local saved_token="${GITHUB_TOKEN:-}"
-	unset GITHUB_TOKEN
-
-	if output=$("$DEVBOX_CLI" create test-mount "$TEST_REPO" --secret github-token --dry-run 2>&1); then
+	if output=$("$DEVBOX_CLI" create test-mount "$TEST_REPO" \
+		--github-secret github-token \
+		--claude-code-secret claude-oauth-token \
+		--dry-run 2>&1); then
 		# Docker command should include volume mount for secrets
 		if [[ "$output" == *"/run/secrets"* ]]; then
-			log_test "create --secret mounts secrets to /run/secrets"
+			log_test "create mounts secrets to /run/secrets"
 			TESTS_PASSED=$((TESTS_PASSED + 1))
 		else
-			log_fail "create --secret should mount secrets to /run/secrets"
+			log_fail "create should mount secrets to /run/secrets"
 			echo "Output was: $output"
 		fi
 	else
-		log_fail "create --secret failed in dry-run mode"
+		log_fail "create failed in dry-run mode"
 		echo "Output was: $output"
 	fi
 
-	# Restore environment
-	if [[ -n "$saved_token" ]]; then
-		export GITHUB_TOKEN="$saved_token"
-	fi
 	cleanup_test_secrets
 }
 
-test_create_help_shows_multiple_secrets() {
+test_create_help_shows_secret_flags() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	local output
 
 	if output=$("$DEVBOX_CLI" create --help 2>&1); then
-		# Help text should indicate --secret is repeatable
-		if [[ "$output" == *"--secret"* ]] &&
-			[[ "$output" == *"repeatable"* || "$output" == *"multiple"* ]]; then
-			log_test "create --help documents multiple --secret support"
+		# Help text should show new secret flags
+		if [[ "$output" == *"--github-secret"* ]] &&
+			[[ "$output" == *"--claude-code-secret"* ]]; then
+			log_test "create --help documents --github-secret and --claude-code-secret"
 			TESTS_PASSED=$((TESTS_PASSED + 1))
 		else
-			log_fail "create --help should document that --secret is repeatable"
+			log_fail "create --help should document secret flags"
 			echo "Output was: $output"
 		fi
 	else
@@ -700,9 +819,6 @@ main() {
 		echo "Docker daemon not running, skipping tests"
 		exit 1
 	fi
-
-	# Setup GITHUB_TOKEN for tests
-	setup_github_token
 
 	# Clean up any leftover containers from previous runs
 	initial_cleanup
@@ -733,13 +849,16 @@ main() {
 	test_create_name_already_exists
 	test_create_complex_command
 
-	# Secure secret injection tests
-	test_create_with_secret_flag
-	test_create_secret_not_in_env_vars
-	test_create_multiple_secrets
-	test_create_secret_not_found
+	# Secure secret injection tests (new flag format)
+	test_create_with_github_secret
+	test_create_secrets_not_in_env_vars
+	test_create_both_secrets_shown
+	test_create_missing_claude_secret_oauth_mode
+	test_create_bedrock_no_claude_secret
+	test_create_github_secret_not_found
+	test_create_missing_github_secret
 	test_create_secret_mount_path
-	test_create_help_shows_multiple_secrets
+	test_create_help_shows_secret_flags
 
 	# Results
 	echo

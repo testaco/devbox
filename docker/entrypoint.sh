@@ -45,6 +45,43 @@ fi
 export GITHUB_TOKEN
 
 # ============================================================================
+# Step 1b: Read Claude Code OAuth Token (for non-Bedrock mode)
+# ============================================================================
+
+# Only needed if not using Bedrock
+if [ "$CLAUDE_CODE_USE_BEDROCK" != "1" ]; then
+	CLAUDE_CODE_OAUTH_TOKEN=""
+
+	# Try reading from secret file
+	if [ -f "/run/secrets/claude_code_token" ]; then
+		CLAUDE_CODE_OAUTH_TOKEN=$(cat /run/secrets/claude_code_token)
+	fi
+
+	if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+		echo ""
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+		echo "✗ ERROR: No Claude Code OAuth token provided"
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+		echo ""
+		echo "A Claude Code OAuth token is required for non-Bedrock mode."
+		echo ""
+		echo "To obtain a token:"
+		echo "  1. Run 'claude setup-token' on your host machine"
+		echo "  2. Store the token as a devbox secret:"
+		echo "     devbox secrets add claude-oauth-token --from-env CLAUDE_CODE_OAUTH_TOKEN"
+		echo "  3. Recreate container with: --claude-code-secret claude-oauth-token"
+		echo ""
+		exit 1
+	fi
+
+	# Export for Claude Code to use
+	export CLAUDE_CODE_OAUTH_TOKEN
+	echo "✓ Claude Code OAuth token configured"
+else
+	echo "ℹ️  Bedrock mode enabled - using AWS credentials for Claude"
+fi
+
+# ============================================================================
 # Step 2: Set up Docker access (DinD only - host socket is not supported)
 # ============================================================================
 
@@ -91,28 +128,22 @@ else
 fi
 
 # ============================================================================
-# Step 3: Set up Claude and AWS credentials
+# Step 3: Set up AWS credentials (for Bedrock mode)
 # ============================================================================
 
 echo "Setting up credentials..."
 mkdir -p ~/.claude ~/.aws
 
-# Claude credentials
-if [ -f "/devbox-credentials/claude/.credentials.json" ]; then
-	cp /devbox-credentials/claude/.credentials.json ~/.claude/.credentials.json
-	chmod 600 ~/.claude/.credentials.json
-	echo "✓ Claude credentials copied"
-fi
-
-if [ -f "/devbox-credentials/claude/settings.json" ]; then
-	cp /devbox-credentials/claude/settings.json ~/.claude/settings.json
-	echo "✓ Claude settings copied"
-fi
-
-# AWS credentials
+# AWS credentials (used by Bedrock mode or for project AWS SDK usage)
 if [ -d "/devbox-credentials/aws" ]; then
 	cp /devbox-credentials/aws/* ~/.aws/ 2>/dev/null || true
 	echo "✓ AWS credentials copied"
+fi
+
+# Copy Claude settings (not credentials - those are via CLAUDE_CODE_OAUTH_TOKEN now)
+if [ -f "/devbox-credentials/claude/settings.json" ]; then
+	cp /devbox-credentials/claude/settings.json ~/.claude/settings.json
+	echo "✓ Claude settings copied"
 fi
 
 # ============================================================================
