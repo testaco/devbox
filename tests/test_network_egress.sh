@@ -1813,6 +1813,13 @@ test_start_reapplies_custom_egress_rules() {
 		return 0
 	fi
 
+	# Skip if credentials volume doesn't exist (required for devbox create)
+	# This happens in CI where devbox init hasn't been run
+	if ! docker volume inspect devbox-credentials >/dev/null 2>&1; then
+		log_skip "Credentials volume not found, skipping (requires 'devbox init' to run first)"
+		return 0
+	fi
+
 	local test_name="devbox-test-reapply-$$"
 	local container_name="${CONTAINER_PREFIX}test-${test_name}"
 	local dns_container="${container_name}-dns"
