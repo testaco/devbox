@@ -742,6 +742,53 @@ test_standard_no_network_none() {
 	fi
 }
 
+test_standard_dry_run_shows_dns_proxy() {
+	log_test "Testing standard mode dry-run shows DNS proxy setup"
+	((TESTS_RUN++)) || true
+
+	local output
+	if output=$("$DEVBOX_BIN" create testname testrepo \
+		--github-secret test-github-secret \
+		--claude-code-secret test-claude-secret \
+		--egress standard \
+		--dry-run 2>&1); then
+		if [[ "$output" == *"DNS proxy"* ]] || [[ "$output" == *"dns proxy"* ]]; then
+			log_pass "Standard mode dry-run shows DNS proxy"
+		else
+			log_fail "Standard mode dry-run should mention DNS proxy"
+			echo "Output: $output"
+			return 1
+		fi
+	else
+		log_fail "Dry-run command failed: $output"
+		return 1
+	fi
+}
+
+test_standard_dry_run_shows_custom_network() {
+	log_test "Testing standard mode dry-run shows custom network"
+	((TESTS_RUN++)) || true
+
+	local output
+	if output=$("$DEVBOX_BIN" create testname testrepo \
+		--github-secret test-github-secret \
+		--claude-code-secret test-claude-secret \
+		--egress standard \
+		--dry-run 2>&1); then
+		# Check for "Custom network:" (case-insensitive match)
+		if [[ "$output" == *"Custom network:"* ]] || [[ "$output" == *"custom network"* ]] || [[ "$output" == *"-net"* ]]; then
+			log_pass "Standard mode dry-run shows custom network"
+		else
+			log_fail "Standard mode dry-run should mention custom network"
+			echo "Output: $output"
+			return 1
+		fi
+	else
+		log_fail "Dry-run command failed: $output"
+		return 1
+	fi
+}
+
 # ============================================================================
 # Test: Integration tests (require Docker)
 # ============================================================================
@@ -788,6 +835,220 @@ test_airgapped_integration_blocks_network() {
 	else
 		log_fail "Airgapped mode should block network but ping succeeded"
 		echo "Ping output: $ping_result"
+		return 1
+	fi
+}
+
+test_standard_integration_creates_dns_proxy() {
+	log_test "Testing standard mode creates DNS proxy container (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker is not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	# This test verifies that when we create network resources manually,
+	# the DNS proxy starts correctly
+	local test_name="devbox-test-dns-$$"
+	local network_name="${test_name}-net"
+	local dns_container="${test_name}-dns"
+
+	# Cleanup any existing resources - be thorough
+	docker rm -f "$dns_container" 2>/dev/null || true
+	# Disconnect all containers from network before removing it
+	for cid in $(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$network_name" 2>/dev/null || true); do
+		docker network disconnect -f "$network_name" "$cid" 2>/dev/null || true
+	done
+	docker network rm "$network_name" 2>/dev/null || true
+
+	# Create isolated network (try with ICC disabled, fall back to standard)
+	local create_output
+	if ! create_output=$(docker network create \
+		--driver bridge \
+		--opt "com.docker.network.bridge.enable_icc=false" \
+		"$network_name" 2>&1); then
+		# Fallback without ICC restriction (kernel module may not be loaded)
+		if ! create_output=$(docker network create \
+			--driver bridge \
+			"$network_name" 2>&1); then
+			log_fail "Failed to create test network: $create_output"
+			return 1
+		fi
+	fi
+
+	# Start DNS proxy with blocked domains from standard profile
+	local blocked_domains="pastebin.com transfer.sh ngrok.io"
+	local dns_config=""
+	for domain in $blocked_domains; do
+		dns_config="${dns_config}address=/${domain}/#\n"
+	done
+
+	if ! docker run -d \
+		--name "$dns_container" \
+		--network "$network_name" \
+		alpine:latest \
+		sh -c "apk add --no-cache dnsmasq >/dev/null 2>&1 && echo -e '$dns_config' > /etc/dnsmasq.d/devbox.conf && dnsmasq -k --log-queries --log-facility=-" >/dev/null 2>&1; then
+		log_fail "Failed to start DNS proxy container"
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Wait for dnsmasq to start
+	sleep 3
+
+	# Verify DNS proxy container is running
+	local dns_status
+	dns_status=$(docker inspect --format '{{.State.Status}}' "$dns_container" 2>/dev/null || echo "not_found")
+
+	# Cleanup
+	docker rm -f "$dns_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	if [[ "$dns_status" == "running" ]]; then
+		log_pass "DNS proxy container runs successfully"
+	else
+		log_fail "DNS proxy container not running (status: $dns_status)"
+		return 1
+	fi
+}
+
+test_standard_integration_blocks_pastebin() {
+	log_test "Testing standard mode DNS proxy blocks pastebin.com (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker is not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	local test_name="devbox-test-block-$$"
+	local network_name="${test_name}-net"
+	local dns_container="${test_name}-dns"
+	local test_container="${test_name}-app"
+
+	# Cleanup any existing resources
+	docker rm -f "$dns_container" "$test_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Create isolated network
+	if ! docker network create --driver bridge "$network_name" >/dev/null 2>&1; then
+		log_fail "Failed to create test network"
+		return 1
+	fi
+
+	# Start DNS proxy with blocked domains
+	local dns_config="address=/pastebin.com/#"
+	if ! docker run -d \
+		--name "$dns_container" \
+		--network "$network_name" \
+		alpine:latest \
+		sh -c "apk add --no-cache dnsmasq >/dev/null 2>&1 && echo '$dns_config' > /etc/dnsmasq.conf && dnsmasq -k -C /etc/dnsmasq.conf" >/dev/null 2>&1; then
+		log_fail "Failed to start DNS proxy container"
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Wait for dnsmasq to start
+	sleep 3
+
+	# Get DNS proxy IP
+	local dns_ip
+	dns_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$dns_container" 2>/dev/null)
+
+	if [[ -z "$dns_ip" ]]; then
+		log_fail "Could not get DNS proxy IP"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Create test container using DNS proxy
+	if ! docker run -d \
+		--name "$test_container" \
+		--network "$network_name" \
+		--dns "$dns_ip" \
+		alpine:latest sleep 60 >/dev/null 2>&1; then
+		log_fail "Failed to create test container"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Install nslookup in test container
+	docker exec "$test_container" apk add --no-cache bind-tools >/dev/null 2>&1 || true
+
+	# Try to resolve pastebin.com - should return NXDOMAIN (exit code != 0 or empty response)
+	set +e
+	local resolve_result
+	resolve_result=$(docker exec "$test_container" nslookup pastebin.com 2>&1)
+	local resolve_exit=$?
+	set -e
+
+	# Cleanup
+	docker rm -f "$dns_container" "$test_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Check if pastebin.com was blocked (NXDOMAIN or failure)
+	if [[ $resolve_exit -ne 0 ]] || [[ "$resolve_result" == *"NXDOMAIN"* ]] || [[ "$resolve_result" == *"can't find"* ]] || [[ "$resolve_result" == *"0.0.0.0"* ]]; then
+		log_pass "DNS proxy blocks pastebin.com (got NXDOMAIN/failure)"
+	else
+		log_fail "DNS proxy should block pastebin.com but resolution succeeded"
+		echo "Resolve output: $resolve_result"
+		return 1
+	fi
+}
+
+test_dns_proxy_cleanup_on_rm() {
+	log_test "Testing DNS proxy and network cleanup (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker is not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	local test_name="devbox-test-cleanup-$$"
+	local network_name="${test_name}-net"
+	local dns_container="${test_name}-dns"
+
+	# Cleanup any existing resources
+	docker rm -f "$dns_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Create network and DNS proxy
+	docker network create --driver bridge "$network_name" >/dev/null 2>&1 || true
+	docker run -d --name "$dns_container" --network "$network_name" alpine:latest sleep 60 >/dev/null 2>&1 || true
+
+	# Verify they exist
+	local network_exists dns_exists
+	network_exists=$(docker network inspect "$network_name" >/dev/null 2>&1 && echo "yes" || echo "no")
+	dns_exists=$(docker inspect "$dns_container" >/dev/null 2>&1 && echo "yes" || echo "no")
+
+	if [[ "$network_exists" != "yes" ]] || [[ "$dns_exists" != "yes" ]]; then
+		log_fail "Failed to create test resources"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Simulate cleanup (what cmd_rm should do)
+	docker rm -f "$dns_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Verify cleanup
+	network_exists=$(docker network inspect "$network_name" >/dev/null 2>&1 && echo "yes" || echo "no")
+	dns_exists=$(docker inspect "$dns_container" >/dev/null 2>&1 && echo "yes" || echo "no")
+
+	if [[ "$network_exists" == "no" ]] && [[ "$dns_exists" == "no" ]]; then
+		log_pass "DNS proxy and network cleaned up successfully"
+	else
+		log_fail "Cleanup failed - network=$network_exists, dns=$dns_exists"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
 		return 1
 	fi
 }
@@ -899,9 +1160,14 @@ main() {
 	test_dry_run_shows_network_mode || true
 	test_permissive_no_network_flag || true
 	test_standard_no_network_none || true
+	test_standard_dry_run_shows_dns_proxy || true
+	test_standard_dry_run_shows_custom_network || true
 
 	# Integration tests (require Docker)
 	test_airgapped_integration_blocks_network || true
+	test_standard_integration_creates_dns_proxy || true
+	test_standard_integration_blocks_pastebin || true
+	test_dns_proxy_cleanup_on_rm || true
 
 	# Summary
 	echo

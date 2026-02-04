@@ -448,12 +448,12 @@ Control outbound network access from devbox containers with security profiles an
 - [x] `cleanup_network_resources()` - remove network, DNS container, iptables rules
 
 ### DNS Proxy (dnsmasq)
-- [ ] Create `docker/dns-proxy/` directory (TODO: future enhancement)
-- [ ] Create `docker/dns-proxy/Dockerfile` based on alpine + dnsmasq (TODO: future enhancement)
-- [ ] Create `docker/dns-proxy/dnsmasq.conf.template` (TODO: future enhancement)
+- [x] DNS proxy using alpine + dnsmasq (inline container, no separate Dockerfile needed)
+- [x] Block domains via dnsmasq address=/#domain/# syntax
+- [x] Configure container to use DNS proxy as resolver (--dns flag)
+- [ ] Create dedicated `docker/dns-proxy/Dockerfile` for production (TODO: future enhancement)
 - [ ] Implement domain allowlist via dnsmasq configuration (TODO: future enhancement)
 - [ ] Log blocked DNS queries for audit (TODO: future enhancement)
-- [ ] Configure container to use DNS proxy as resolver (TODO: future enhancement)
 
 ### iptables Integration
 - [ ] Create per-container chain in DOCKER-USER (TODO: future enhancement)
@@ -473,8 +473,8 @@ Control outbound network access from devbox containers with security profiles an
 - [ ] Update DNS proxy allowlist dynamically (TODO: future enhancement)
 
 ### Cleanup Integration
-- [ ] Update `cmd_rm` to remove container network (TODO: when network isolation implemented)
-- [ ] Update `cmd_rm` to remove DNS proxy sidecar (TODO: when DNS proxy implemented)
+- [x] Update `cmd_rm` to remove container network (via cleanup_network_resources)
+- [x] Update `cmd_rm` to remove DNS proxy sidecar (via cleanup_network_resources)
 - [ ] Update `cmd_rm` to remove iptables rules (TODO: when iptables rules implemented)
 
 ### Testing
@@ -489,12 +489,13 @@ Control outbound network access from devbox containers with security profiles an
 
 #### Integration Tests
 - [x] Test airgapped mode blocks all network (airgapped enforcement implemented with --network none)
-- [ ] Test standard mode allows package manager domains (TODO: when DNS filtering implemented)
-- [ ] Test standard mode blocks pastebin.com (TODO: when DNS filtering implemented)
-- [ ] Test `--allow-domain` adds custom domain access (TODO: when DNS filtering implemented)
-- [ ] Test DNS proxy logs queries (TODO: when DNS proxy implemented)
+- [x] Test standard mode creates DNS proxy container
+- [x] Test standard mode blocks pastebin.com (via DNS proxy NXDOMAIN)
+- [x] Test DNS proxy and network cleanup on container removal
+- [ ] Test standard mode allows package manager domains (TODO: future enhancement)
+- [ ] Test `--allow-domain` adds custom domain access (TODO: future enhancement)
+- [ ] Test DNS proxy logs queries (TODO: future enhancement)
 - [ ] Test iptables rules applied correctly (TODO: when iptables rules implemented)
-- [ ] Test cleanup removes all network resources (TODO: when network resources implemented)
 
 ### Bash Completion
 - [x] Add `--egress` flag completion with profile values

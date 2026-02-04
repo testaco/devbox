@@ -147,10 +147,22 @@ create_container_network() {
 		return 0
 	fi
 
-	# Create isolated bridge network
+	# Try to create isolated bridge network with ICC disabled
+	# Fall back to standard bridge if ICC restriction is not supported (missing kernel module)
 	if docker network create \
 		--driver bridge \
 		--opt "com.docker.network.bridge.enable_icc=false" \
+		--label "devbox.container=$container_name" \
+		--label "devbox.type=egress-network" \
+		"$network_name" >/dev/null 2>&1; then
+		echo "$network_name"
+		return 0
+	fi
+
+	# Fallback: create network without ICC restriction
+	# This happens when br_netfilter kernel module is not loaded
+	if docker network create \
+		--driver bridge \
 		--label "devbox.container=$container_name" \
 		--label "devbox.type=egress-network" \
 		"$network_name" >/dev/null 2>&1; then
@@ -163,7 +175,7 @@ create_container_network() {
 
 # Start DNS proxy sidecar for domain filtering
 # Usage: start_dns_proxy <container_name> <allowed_domains> <blocked_domains>
-# Returns DNS proxy container ID on success
+# Returns DNS proxy IP address on success (empty string means no filtering needed)
 start_dns_proxy() {
 	local container_name="$1"
 	local allowed_domains="$2"
@@ -171,42 +183,57 @@ start_dns_proxy() {
 	local dns_container="${container_name}-dns"
 	local network_name="${container_name}-net"
 
-	# Skip if permissive mode (no filtering needed)
-	if [[ -z "$allowed_domains" ]] && [[ -z "$blocked_domains" ]]; then
-		return 0
-	fi
+	# Remove any existing DNS container first
+	docker rm -f "$dns_container" >/dev/null 2>&1 || true
 
-	# Create dnsmasq configuration
+	# Create dnsmasq configuration for blocked domains
 	local dns_config=""
 
-	# Add blocked domains (return NXDOMAIN)
+	# Add blocked domains (return NXDOMAIN via address=/#)
 	for domain in $blocked_domains; do
 		# Skip comments and empty lines
 		[[ "$domain" =~ ^#.*$ ]] && continue
 		[[ -z "$domain" ]] && continue
-		# Handle wildcards - dnsmasq uses server=/domain/ syntax
-		domain="${domain#\*.}" # Remove leading *.
+		# Handle wildcards - dnsmasq uses address=/domain/# syntax
+		# Remove leading *. if present
+		domain="${domain#\*.}"
 		dns_config="${dns_config}address=/${domain}/#\n"
 	done
 
-	# For strict mode with allowlist, we'd need more complex configuration
-	# For now, use dnsmasq in basic mode with upstream DNS
-
 	# Start dnsmasq container
+	# Using alpine with dnsmasq, configure to:
+	# - Block specified domains (return NXDOMAIN)
+	# - Forward all other queries to upstream DNS (8.8.8.8, 1.1.1.1)
 	local dns_id
-	if dns_id=$(docker run -d \
+	if ! dns_id=$(docker run -d \
 		--name "$dns_container" \
 		--network "$network_name" \
 		--label "devbox.container=$container_name" \
 		--label "devbox.type=dns-proxy" \
 		--restart unless-stopped \
 		alpine:latest \
-		sh -c "apk add --no-cache dnsmasq && echo -e '$dns_config' > /etc/dnsmasq.d/devbox.conf && dnsmasq -k --log-queries --log-facility=-" 2>/dev/null); then
-		echo "$dns_id"
-		return 0
+		sh -c "apk add --no-cache dnsmasq >/dev/null 2>&1 && mkdir -p /etc/dnsmasq.d && echo -e '$dns_config' > /etc/dnsmasq.d/devbox.conf && echo 'server=8.8.8.8' >> /etc/dnsmasq.conf && echo 'server=1.1.1.1' >> /etc/dnsmasq.conf && dnsmasq -k --log-queries --log-facility=-" 2>&1); then
+		return 1
 	fi
 
-	return 1
+	# Wait for container to start and get IP address (max 30 seconds)
+	local dns_ip=""
+	local attempts=0
+	local max_attempts=30
+	while [[ -z "$dns_ip" ]] && [[ $attempts -lt $max_attempts ]]; do
+		sleep 1
+		dns_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$dns_container" 2>/dev/null || true)
+		((attempts++)) || true
+	done
+
+	if [[ -z "$dns_ip" ]]; then
+		# Cleanup failed DNS proxy
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	echo "$dns_ip"
+	return 0
 }
 
 # Get DNS proxy IP address
@@ -226,10 +253,19 @@ cleanup_network_resources() {
 	local network_name="${container_name}-net"
 
 	# Stop and remove DNS proxy container
-	docker rm -f "$dns_container" >/dev/null 2>&1 || true
+	if docker rm -f "$dns_container" >/dev/null 2>&1; then
+		# Log only if we have access to log_info (it may not be available)
+		if declare -f log_info >/dev/null 2>&1; then
+			log_info "DNS proxy removed"
+		fi
+	fi
 
 	# Remove network (must be done after containers are removed)
-	docker network rm "$network_name" >/dev/null 2>&1 || true
+	if docker network rm "$network_name" >/dev/null 2>&1; then
+		if declare -f log_info >/dev/null 2>&1; then
+			log_info "Egress network removed"
+		fi
+	fi
 
 	return 0
 }

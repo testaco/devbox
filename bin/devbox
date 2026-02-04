@@ -916,11 +916,23 @@ EOF
 	# Build Docker run command
 	local docker_cmd="docker run -dit"
 
+	# Network configuration for egress control
+	local network_name=""
+	local dns_container=""
+	local dns_proxy_ip=""
+	local use_custom_network=false
+
 	# Apply network mode from egress profile
 	# airgapped profile sets EGRESS_NETWORK_MODE="none" which means --network none
 	if [[ "$EGRESS_NETWORK_MODE" == "none" ]]; then
 		docker_cmd="$docker_cmd --network none"
+	elif [[ "$EGRESS_NETWORK_MODE" == "custom" ]]; then
+		# Standard/strict profiles use custom network with DNS proxy
+		use_custom_network=true
+		network_name="${full_container_name}-net"
+		dns_container="${full_container_name}-dns"
 	fi
+	# permissive mode (bridge) uses default Docker networking
 
 	docker_cmd="$docker_cmd --name $full_container_name"
 	docker_cmd="$docker_cmd -v ${DEVBOX_VOLUME}:/devbox-credentials:ro"
@@ -998,6 +1010,10 @@ EOF
 		if [[ -n "$EGRESS_NETWORK_MODE" ]]; then
 			echo "  Network mode: $EGRESS_NETWORK_MODE"
 		fi
+		if [[ "$use_custom_network" == true ]]; then
+			echo "  Custom network: $network_name"
+			echo "  DNS proxy: $dns_container (filters blocked domains)"
+		fi
 		if [[ ${#allow_domains[@]} -gt 0 ]]; then
 			echo "  Additional allowed domains: ${allow_domains[*]}"
 		fi
@@ -1026,6 +1042,45 @@ EOF
 		log_error "Credentials volume '$DEVBOX_VOLUME' does not exist"
 		log_error "Run 'devbox init' first to set up credentials"
 		return 1
+	fi
+
+	# Set up custom network with DNS proxy for standard/strict egress profiles
+	if [[ "$use_custom_network" == true ]]; then
+		if declare -f with_spinner >/dev/null 2>&1; then
+			start_spinner "Setting up egress network and DNS proxy"
+		else
+			log_info "Setting up egress network with DNS filtering..."
+		fi
+
+		# Create isolated network
+		if ! network_name=$(create_container_network "$full_container_name"); then
+			if declare -f stop_spinner >/dev/null 2>&1; then
+				stop_spinner 1
+			fi
+			log_error "Failed to create egress network"
+			return 1
+		fi
+
+		# Start DNS proxy with domain filtering
+		dns_proxy_ip=$(start_dns_proxy "$full_container_name" "$EGRESS_ALLOWED_DOMAINS" "$EGRESS_BLOCKED_DOMAINS")
+		if [[ -z "$dns_proxy_ip" ]]; then
+			if declare -f stop_spinner >/dev/null 2>&1; then
+				stop_spinner 1
+			fi
+			log_error "Failed to start DNS proxy"
+			# Cleanup network
+			docker network rm "$network_name" >/dev/null 2>&1 || true
+			return 1
+		fi
+
+		if declare -f stop_spinner >/dev/null 2>&1; then
+			stop_spinner 0
+		fi
+
+		log_info "DNS proxy started on network $network_name"
+
+		# Add network and DNS configuration to docker command
+		docker_cmd="$docker_cmd --network $network_name --dns $dns_proxy_ip"
 	fi
 
 	# Fix workspace volume permissions (similar to credentials volume fix in cmd_init)
@@ -1783,6 +1838,9 @@ EOF
 				if docker volume rm "$sudoers_volume" >/dev/null 2>&1; then
 					log_info "Sudoers volume removed for '$display_name'"
 				fi
+
+				# Cleanup network resources (DNS proxy container and custom network)
+				cleanup_network_resources "$full_container_name"
 			else
 				log_error "Failed to remove container '$display_name'"
 				((failed_count++)) || true
@@ -1901,6 +1959,9 @@ EOF
 				if docker volume rm "$sudoers_volume" >/dev/null 2>&1; then
 					log_info "Sudoers volume removed"
 				fi
+
+				# Cleanup network resources (DNS proxy container and custom network)
+				cleanup_network_resources "$full_container_name"
 			fi
 		else
 			log_error "Failed to remove container '$display_name'"
