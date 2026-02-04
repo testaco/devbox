@@ -496,7 +496,7 @@ Control outbound network access from devbox containers with security profiles an
 - [x] Test DNS proxy and network cleanup on container removal
 - [x] Test strict profile DNS allowlist blocks non-whitelisted domains
 - [x] Test standard mode allows package manager domains (registry.npmjs.org resolves)
-- [ ] Test `--allow-domain` adds custom domain access (TODO: future enhancement)
+- [x] Test `--allow-domain` adds custom domain access
 - [ ] Test DNS proxy logs queries (TODO: future enhancement)
 - [ ] Test iptables rules applied correctly (TODO: when iptables rules implemented)
 

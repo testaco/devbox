@@ -1271,6 +1271,136 @@ test_standard_profile_allows_whitelisted_domains() {
 	fi
 }
 
+# Test: --allow-domain adds custom domain to DNS allowlist
+test_allow_domain_integration() {
+	log_test "Testing --allow-domain adds custom domain access (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker is not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	local test_name="devbox-test-allowdom-$$"
+	local network_name="${test_name}-net"
+	local dns_container="${test_name}-dns"
+	local test_container="${test_name}-app"
+
+	# Cleanup any existing resources
+	docker rm -f "$dns_container" "$test_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Source the network library to use merge_egress_rules
+	export PROJECT_ROOT="$PROJECT_ROOT"
+	# shellcheck source=/dev/null
+	source "$PROJECT_ROOT/lib/network.sh"
+
+	# Load strict profile (allowlist mode - blocks everything by default)
+	if ! load_egress_profile "strict" "$PROJECT_ROOT/profiles"; then
+		log_fail "Failed to load strict profile"
+		return 1
+	fi
+
+	# Verify we're in allowlist mode
+	if [[ "$EGRESS_DEFAULT_ACTION" != "drop" ]]; then
+		log_fail "Strict profile should have DEFAULT_ACTION=drop, got: $EGRESS_DEFAULT_ACTION"
+		return 1
+	fi
+
+	# Add custom domain via merge_egress_rules (simulates --allow-domain flag)
+	# Use httpbin.org which is a real domain but NOT in the strict allowlist
+	merge_egress_rules "allow_domain" "httpbin.org"
+
+	# Verify the domain was added to the allowed list
+	if [[ "$EGRESS_ALLOWED_DOMAINS" != *"httpbin.org"* ]]; then
+		log_fail "merge_egress_rules did not add httpbin.org to EGRESS_ALLOWED_DOMAINS"
+		return 1
+	fi
+
+	# Create isolated network
+	if ! docker network create --driver bridge "$network_name" >/dev/null 2>&1; then
+		log_fail "Failed to create test network"
+		return 1
+	fi
+
+	# Start DNS proxy with merged rules using the library function
+	local dns_ip
+	if ! dns_ip=$(start_dns_proxy "$test_name" "$EGRESS_ALLOWED_DOMAINS" "$EGRESS_BLOCKED_DOMAINS" "$EGRESS_DEFAULT_ACTION"); then
+		log_fail "Failed to start DNS proxy"
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	if [[ -z "$dns_ip" ]]; then
+		log_fail "DNS proxy started but no IP returned"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Create test container using DNS proxy
+	if ! docker run -d \
+		--name "$test_container" \
+		--network "$network_name" \
+		--dns "$dns_ip" \
+		alpine:latest sleep 60 >/dev/null 2>&1; then
+		log_fail "Failed to create test container"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Install nslookup in test container
+	docker exec "$test_container" apk add --no-cache bind-tools >/dev/null 2>&1 || true
+
+	# Test 1: httpbin.org (custom allowed domain) should resolve
+	set +e
+	local resolve_custom
+	resolve_custom=$(docker exec "$test_container" nslookup httpbin.org 2>&1)
+	local custom_exit=$?
+	set -e
+
+	# Test 2: randomnotallowed.example.com should be BLOCKED (not in allowlist)
+	set +e
+	local resolve_blocked
+	resolve_blocked=$(docker exec "$test_container" nslookup randomnotallowed.example.com 2>&1)
+	local blocked_exit=$?
+	set -e
+
+	# Cleanup
+	docker rm -f "$dns_container" "$test_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Verify: custom allowed domain should resolve successfully
+	local custom_ok=false
+	if [[ $custom_exit -eq 0 ]] && [[ "$resolve_custom" == *"Address"* ]] && [[ "$resolve_custom" != *"0.0.0.0"* ]]; then
+		custom_ok=true
+	fi
+
+	# Verify: non-allowlisted domain should be blocked
+	local blocked_ok=false
+	local resolve_blocked_lower
+	resolve_blocked_lower=$(echo "$resolve_blocked" | tr '[:upper:]' '[:lower:]')
+	if [[ $blocked_exit -ne 0 ]] || [[ "$resolve_blocked_lower" == *"nxdomain"* ]] || [[ "$resolve_blocked_lower" == *"can't find"* ]] || [[ "$resolve_blocked_lower" == *"no answer"* ]] || [[ "$resolve_blocked" == *"0.0.0.0"* ]]; then
+		blocked_ok=true
+	fi
+
+	if [[ "$custom_ok" == true ]] && [[ "$blocked_ok" == true ]]; then
+		log_pass "--allow-domain: custom domain httpbin.org resolves, non-allowed domain blocked"
+	else
+		if [[ "$custom_ok" != true ]]; then
+			log_fail "--allow-domain should make httpbin.org resolve, but it failed"
+			echo "Custom domain output: $resolve_custom"
+		fi
+		if [[ "$blocked_ok" != true ]]; then
+			log_fail "Non-allowlisted domain should be blocked, but resolution succeeded"
+			echo "Blocked domain output: $resolve_blocked"
+		fi
+		return 1
+	fi
+}
+
 # ============================================================================
 # Test: lib/network.sh helper library
 # ============================================================================
@@ -1388,6 +1518,7 @@ main() {
 	test_dns_proxy_cleanup_on_rm || true
 	test_strict_profile_dns_allowlist || true
 	test_standard_profile_allows_whitelisted_domains || true
+	test_allow_domain_integration || true
 
 	# Summary
 	echo
