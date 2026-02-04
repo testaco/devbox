@@ -380,6 +380,138 @@ The OAuth flow during `devbox init` is unreliable and requires browser interacti
 
 ---
 
+## Phase 6: Network Egress Control
+
+Control outbound network access from devbox containers with security profiles and domain/IP filtering.
+
+### Design Decisions
+- **Default profile:** `standard` (secure by default with dev-friendly allowlist)
+- **DNS proxy:** Per-container sidecar for isolated domain filtering
+- **DinD scope:** Outer container only (inner Docker unrestricted)
+
+### Architecture
+- Custom Docker networks for per-container isolation
+- DNS proxy sidecar (dnsmasq) for domain-level filtering
+- iptables rules via DOCKER-USER chain for IP/port filtering
+
+### Security Profiles
+
+#### Profile Configuration
+- [x] Create `profiles/` directory structure
+- [x] Create `profiles/permissive.conf` - all egress allowed
+- [x] Create `profiles/standard.conf` - dev-friendly allowlist
+- [x] Create `profiles/strict.conf` - minimal allowlist
+- [x] Create `profiles/airgapped.conf` - no network
+
+#### Profile Implementation
+- [x] `permissive`: All egress allowed (current behavior) - configuration ready
+- [x] `standard`: DNS filtering with default allowlist (pkg managers, git hosts, cloud APIs) - configuration ready
+- [x] `strict`: Only explicit allowlist, all else blocked - configuration ready
+- [x] `airgapped`: `--network none`, no connectivity - configuration ready
+
+### Default Allowlist (Standard Profile)
+
+#### Allowed Ports
+- [x] 53 (DNS), 22 (SSH), 80 (HTTP), 443 (HTTPS), 9418 (Git)
+
+#### Allowed Domains
+- [x] Package managers: npmjs.org, pypi.org, crates.io, rubygems.org, cache.nixos.org
+- [x] Git hosts: github.com, gitlab.com, bitbucket.org
+- [x] Container registries: docker.io, ghcr.io, gcr.io
+- [x] Cloud APIs: amazonaws.com, googleapis.com, azure.com, anthropic.com
+
+#### Blocked by Default
+- [x] Data exfiltration vectors: pastebin.com, transfer.sh, ngrok.io
+
+### CLI Flags for `devbox create`
+- [x] `--egress <profile>` flag (permissive|standard|strict|airgapped)
+- [x] `--allow-domain <domain>` flag (repeatable)
+- [x] `--allow-ip <ip/cidr>` flag (repeatable)
+- [x] `--allow-port <port>` flag (repeatable)
+- [x] `--block-domain <domain>` flag (repeatable)
+- [x] `--block-ip <ip/cidr>` flag (repeatable)
+- [x] Default to `standard` profile when `--egress` not specified
+
+### `devbox network` Subcommand
+- [x] `devbox network show <container>` - display current egress rules
+- [x] `devbox network allow <container> --domain|--ip|--port` - add allow rule
+- [x] `devbox network block <container> --domain|--ip` - add block rule
+- [x] `devbox network logs <container>` - view egress logs
+- [x] `devbox network logs <container> --blocked-only` - view only blocked attempts
+- [x] `devbox network reset <container>` - reset to profile defaults
+
+### Network Helper Library
+- [x] Create `lib/network.sh` with helper functions
+- [x] `create_container_network()` - create isolated Docker network
+- [x] `start_dns_proxy()` - start dnsmasq sidecar container
+- [ ] `setup_iptables_rules()` - apply firewall rules via setup container (TODO: runtime enforcement)
+- [x] `cleanup_network_resources()` - remove network, DNS container, iptables rules
+
+### DNS Proxy (dnsmasq)
+- [ ] Create `docker/dns-proxy/` directory (TODO: future enhancement)
+- [ ] Create `docker/dns-proxy/Dockerfile` based on alpine + dnsmasq (TODO: future enhancement)
+- [ ] Create `docker/dns-proxy/dnsmasq.conf.template` (TODO: future enhancement)
+- [ ] Implement domain allowlist via dnsmasq configuration (TODO: future enhancement)
+- [ ] Log blocked DNS queries for audit (TODO: future enhancement)
+- [ ] Configure container to use DNS proxy as resolver (TODO: future enhancement)
+
+### iptables Integration
+- [ ] Create per-container chain in DOCKER-USER (TODO: future enhancement)
+- [ ] Apply port filtering rules (TODO: future enhancement)
+- [ ] Apply IP/CIDR filtering rules (TODO: future enhancement)
+- [ ] Log blocked connections with identifiable prefix (TODO: future enhancement)
+- [ ] Cleanup rules when container removed (TODO: future enhancement)
+
+### Container Labels
+- [x] Store egress profile in label: `devbox.egress`
+- [x] Store custom rules in labels: `devbox.egress.allow.*`, `devbox.egress.block.*`
+- [x] Update `devbox list` to show EGRESS column
+
+### Runtime Rule Persistence
+- [x] Store runtime-added rules in container labels
+- [ ] Re-apply rules on container restart (TODO: future enhancement)
+- [ ] Update DNS proxy allowlist dynamically (TODO: future enhancement)
+
+### Cleanup Integration
+- [ ] Update `cmd_rm` to remove container network (TODO: when network isolation implemented)
+- [ ] Update `cmd_rm` to remove DNS proxy sidecar (TODO: when DNS proxy implemented)
+- [ ] Update `cmd_rm` to remove iptables rules (TODO: when iptables rules implemented)
+
+### Testing
+
+#### Unit Tests
+- [x] Create `tests/test_network_egress.sh`
+- [x] Test `--egress` flag parsing
+- [x] Test profile configuration loading
+- [x] Test `--allow-domain`, `--allow-ip`, `--allow-port` flags
+- [x] Test `--block-domain`, `--block-ip` flags
+- [x] Test default profile is `standard`
+
+#### Integration Tests
+- [ ] Test airgapped mode blocks all network (TODO: when airgapped enforcement implemented)
+- [ ] Test standard mode allows package manager domains (TODO: when DNS filtering implemented)
+- [ ] Test standard mode blocks pastebin.com (TODO: when DNS filtering implemented)
+- [ ] Test `--allow-domain` adds custom domain access (TODO: when DNS filtering implemented)
+- [ ] Test DNS proxy logs queries (TODO: when DNS proxy implemented)
+- [ ] Test iptables rules applied correctly (TODO: when iptables rules implemented)
+- [ ] Test cleanup removes all network resources (TODO: when network resources implemented)
+
+### Bash Completion
+- [x] Add `--egress` flag completion with profile values
+- [x] Add `--allow-domain`, `--allow-ip`, `--allow-port` completion
+- [x] Add `--block-domain`, `--block-ip` completion
+- [x] Add `devbox network` subcommand completion
+- [x] Add container name completion for network commands
+
+### Documentation
+- [x] Update README.md with egress control section
+- [x] Document security profiles and use cases
+- [x] Document default allowlist domains
+- [x] Document runtime rule management
+- [ ] Add troubleshooting for blocked connections (TODO: when enforcement implemented)
+
+---
+
 ## Known Risks / To Validate
 
 - [ ] **Nix in Docker**: Test Determinate installer actually works in container

@@ -19,7 +19,7 @@ _devbox_completion() {
 	_init_completion || return
 
 	# Top-level commands
-	local commands="init create list attach stop start rm logs exec ports secrets help"
+	local commands="init create list attach stop start rm logs exec ports secrets network help"
 
 	# Get the command (first non-option argument)
 	local command=""
@@ -51,12 +51,12 @@ _devbox_completion() {
 
 	create)
 		# Check if we need container name, repo URL, or options
-		local create_opts="--port -p --github-secret --claude-code-secret --bedrock --aws-profile --enable-docker --sudo --help -h"
+		local create_opts="--port -p --github-secret --claude-code-secret --bedrock --aws-profile --enable-docker --sudo --egress --allow-domain --block-domain --allow-ip --block-ip --allow-port --help -h"
 
 		# Count non-option arguments after 'create'
 		local arg_count=0
 		for ((i = 2; i < cword; i++)); do
-			if [[ "${words[i]}" != -* ]] && [[ "${words[i - 1]}" != --port ]] && [[ "${words[i - 1]}" != -p ]] && [[ "${words[i - 1]}" != --aws-profile ]] && [[ "${words[i - 1]}" != --github-secret ]] && [[ "${words[i - 1]}" != --claude-code-secret ]] && [[ "${words[i - 1]}" != --sudo ]]; then
+			if [[ "${words[i]}" != -* ]] && [[ "${words[i - 1]}" != --port ]] && [[ "${words[i - 1]}" != -p ]] && [[ "${words[i - 1]}" != --aws-profile ]] && [[ "${words[i - 1]}" != --github-secret ]] && [[ "${words[i - 1]}" != --claude-code-secret ]] && [[ "${words[i - 1]}" != --sudo ]] && [[ "${words[i - 1]}" != --egress ]] && [[ "${words[i - 1]}" != --allow-domain ]] && [[ "${words[i - 1]}" != --block-domain ]] && [[ "${words[i - 1]}" != --allow-ip ]] && [[ "${words[i - 1]}" != --block-ip ]] && [[ "${words[i - 1]}" != --allow-port ]]; then
 				((arg_count++))
 			fi
 		done
@@ -80,6 +80,13 @@ _devbox_completion() {
 		elif [[ "$prev" == "--sudo" ]]; then
 			# Complete sudo modes
 			COMPREPLY=($(compgen -W "nopass password" -- "$cur"))
+			return 0
+		elif [[ "$prev" == "--egress" ]]; then
+			# Complete egress profiles
+			COMPREPLY=($(compgen -W "permissive standard strict airgapped" -- "$cur"))
+			return 0
+		elif [[ "$prev" == "--allow-domain" ]] || [[ "$prev" == "--block-domain" ]] || [[ "$prev" == "--allow-ip" ]] || [[ "$prev" == "--block-ip" ]] || [[ "$prev" == "--allow-port" ]]; then
+			# User needs to enter value manually
 			return 0
 		else
 			# Suggest flags
@@ -231,6 +238,81 @@ _devbox_completion() {
 					COMPREPLY=($(compgen -W "$import_opts" -- "$cur"))
 				fi
 				# Don't complete env var names - user should type them
+				;;
+			esac
+		fi
+		;;
+
+	network)
+		# Get network subcommand
+		local network_subcmd=""
+		for ((i = 2; i < cword; i++)); do
+			if [[ "${words[i]}" != -* ]]; then
+				network_subcmd="${words[i]}"
+				break
+			fi
+		done
+
+		if [[ -z "$network_subcmd" ]]; then
+			# Complete subcommands
+			local network_cmds="show allow block logs reset --help -h"
+			COMPREPLY=($(compgen -W "$network_cmds" -- "$cur"))
+		else
+			case "$network_subcmd" in
+			show)
+				if [[ "$cur" == -* ]]; then
+					local show_opts="--help -h"
+					COMPREPLY=($(compgen -W "$show_opts" -- "$cur"))
+				else
+					# Complete container names
+					COMPREPLY=($(compgen -W "$(_devbox_containers)" -- "$cur"))
+				fi
+				;;
+			allow)
+				if [[ "$cur" == -* ]]; then
+					local allow_opts="--domain --ip --port --dry-run --help -h"
+					COMPREPLY=($(compgen -W "$allow_opts" -- "$cur"))
+				elif [[ "$prev" == "--domain" ]] || [[ "$prev" == "--ip" ]] || [[ "$prev" == "--port" ]]; then
+					# User needs to enter value manually
+					return 0
+				else
+					# Complete container names
+					COMPREPLY=($(compgen -W "$(_devbox_containers)" -- "$cur"))
+				fi
+				;;
+			block)
+				if [[ "$cur" == -* ]]; then
+					local block_opts="--domain --ip --dry-run --help -h"
+					COMPREPLY=($(compgen -W "$block_opts" -- "$cur"))
+				elif [[ "$prev" == "--domain" ]] || [[ "$prev" == "--ip" ]]; then
+					# User needs to enter value manually
+					return 0
+				else
+					# Complete container names
+					COMPREPLY=($(compgen -W "$(_devbox_containers)" -- "$cur"))
+				fi
+				;;
+			logs)
+				if [[ "$cur" == -* ]]; then
+					local logs_opts="--blocked-only --follow -f --tail --dry-run --help -h"
+					COMPREPLY=($(compgen -W "$logs_opts" -- "$cur"))
+				elif [[ "$prev" == "--tail" ]]; then
+					COMPREPLY=($(compgen -W "10 50 100 200 500" -- "$cur"))
+				else
+					# Complete container names
+					COMPREPLY=($(compgen -W "$(_devbox_containers)" -- "$cur"))
+				fi
+				;;
+			reset)
+				if [[ "$cur" == -* ]]; then
+					local reset_opts="--profile --force -f --dry-run --help -h"
+					COMPREPLY=($(compgen -W "$reset_opts" -- "$cur"))
+				elif [[ "$prev" == "--profile" ]]; then
+					COMPREPLY=($(compgen -W "permissive standard strict airgapped" -- "$cur"))
+				else
+					# Complete container names
+					COMPREPLY=($(compgen -W "$(_devbox_containers)" -- "$cur"))
+				fi
 				;;
 			esac
 		fi
