@@ -1558,18 +1558,24 @@ test_network_reset_integration() {
 	# shellcheck source=/dev/null
 	source "$PROJECT_ROOT/lib/network.sh"
 
-	# Create network
-	if ! docker network create "$network_name" >/dev/null 2>&1; then
-		log_fail "Failed to create test network"
+	# Create network with subnet (required for --ip static IP assignment)
+	# Use a unique subnet based on process ID to avoid conflicts
+	local subnet_third_octet=$((($$ % 200) + 50)) # 50-250 to avoid common subnets
+	local subnet="172.${subnet_third_octet}.0.0/16"
+	if ! docker network create --subnet "$subnet" "$network_name" >/dev/null 2>&1; then
+		log_fail "Failed to create test network with subnet $subnet"
 		return 1
 	fi
 
 	# Start DNS proxy with a config that blocks example.com
 	# (simulating custom block rule)
+	# Assign a specific IP within the subnet
+	local static_ip="172.${subnet_third_octet}.0.2"
 	local custom_dns_config="address=/example.com/#"
 	if ! docker run -d \
 		--name "$dns_container" \
 		--network "$network_name" \
+		--ip "$static_ip" \
 		alpine:latest \
 		sh -c "apk add --no-cache dnsmasq >/dev/null 2>&1 && echo '$custom_dns_config' > /etc/dnsmasq.conf && echo 'server=8.8.8.8' >> /etc/dnsmasq.conf && dnsmasq -k" >/dev/null 2>&1; then
 		log_fail "Failed to start initial DNS proxy"
@@ -1696,9 +1702,12 @@ test_restart_dns_proxy_preserves_ip() {
 	# shellcheck source=/dev/null
 	source "$PROJECT_ROOT/lib/network.sh"
 
-	# Create network
-	if ! docker network create "$network_name" >/dev/null 2>&1; then
-		log_fail "Failed to create test network"
+	# Create network with subnet (required for static IP assignment)
+	# Use unique subnet to avoid conflicts
+	local subnet_third_octet=$((($$ % 200) + 50))
+	local subnet="172.${subnet_third_octet}.0.0/16"
+	if ! docker network create --subnet "$subnet" "$network_name" >/dev/null 2>&1; then
+		log_fail "Failed to create test network with subnet"
 		return 1
 	fi
 
@@ -1709,8 +1718,10 @@ test_restart_dns_proxy_preserves_ip() {
 		return 1
 	fi
 
+	# Use a specific static IP for the initial start
+	local static_ip="172.${subnet_third_octet}.0.2"
 	local initial_ip
-	initial_ip=$(start_dns_proxy "$test_name" "$EGRESS_ALLOWED_DOMAINS" "$EGRESS_BLOCKED_DOMAINS" "$EGRESS_DEFAULT_ACTION")
+	initial_ip=$(start_dns_proxy "$test_name" "$EGRESS_ALLOWED_DOMAINS" "$EGRESS_BLOCKED_DOMAINS" "$EGRESS_DEFAULT_ACTION" "$static_ip")
 
 	if [[ -z "$initial_ip" ]]; then
 		log_fail "Failed to start initial DNS proxy"
