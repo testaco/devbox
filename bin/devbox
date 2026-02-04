@@ -1062,7 +1062,8 @@ EOF
 		fi
 
 		# Start DNS proxy with domain filtering
-		dns_proxy_ip=$(start_dns_proxy "$full_container_name" "$EGRESS_ALLOWED_DOMAINS" "$EGRESS_BLOCKED_DOMAINS")
+		# Pass default_action to determine allowlist (drop) vs blocklist (accept) mode
+		dns_proxy_ip=$(start_dns_proxy "$full_container_name" "$EGRESS_ALLOWED_DOMAINS" "$EGRESS_BLOCKED_DOMAINS" "$EGRESS_DEFAULT_ACTION")
 		if [[ -z "$dns_proxy_ip" ]]; then
 			if declare -f stop_spinner >/dev/null 2>&1; then
 				stop_spinner 1

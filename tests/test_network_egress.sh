@@ -1053,6 +1053,224 @@ test_dns_proxy_cleanup_on_rm() {
 	fi
 }
 
+test_strict_profile_dns_allowlist() {
+	log_test "Testing strict profile DNS allowlist blocks non-whitelisted domains (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker is not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	local test_name="devbox-test-strict-$$"
+	local network_name="${test_name}-net"
+	local dns_container="${test_name}-dns"
+	local test_container="${test_name}-app"
+
+	# Cleanup any existing resources
+	docker rm -f "$dns_container" "$test_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Create isolated network
+	if ! docker network create --driver bridge "$network_name" >/dev/null 2>&1; then
+		log_fail "Failed to create test network"
+		return 1
+	fi
+
+	# DNS proxy config for allowlist mode (DEFAULT_ACTION=drop):
+	# - Block everything by default with address=/#/
+	# - Allow only specific domains via server=/domain/upstream entries
+	local dns_config
+	dns_config=$(
+		cat <<'EOF'
+# Block all domains by default (return NXDOMAIN)
+address=/#/
+
+# Allow only specific domains - forward to upstream DNS
+server=/github.com/8.8.8.8
+server=/api.github.com/8.8.8.8
+EOF
+	)
+
+	# Start DNS proxy with allowlist configuration
+	if ! docker run -d \
+		--name "$dns_container" \
+		--network "$network_name" \
+		alpine:latest \
+		sh -c "apk add --no-cache dnsmasq >/dev/null 2>&1 && echo '$dns_config' > /etc/dnsmasq.conf && dnsmasq -k -C /etc/dnsmasq.conf --log-queries" >/dev/null 2>&1; then
+		log_fail "Failed to start DNS proxy container"
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Wait for dnsmasq to start
+	sleep 3
+
+	# Get DNS proxy IP
+	local dns_ip
+	dns_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$dns_container" 2>/dev/null)
+
+	if [[ -z "$dns_ip" ]]; then
+		log_fail "Could not get DNS proxy IP"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Create test container using DNS proxy
+	if ! docker run -d \
+		--name "$test_container" \
+		--network "$network_name" \
+		--dns "$dns_ip" \
+		alpine:latest sleep 60 >/dev/null 2>&1; then
+		log_fail "Failed to create test container"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Install nslookup in test container
+	docker exec "$test_container" apk add --no-cache bind-tools >/dev/null 2>&1 || true
+
+	# Test 1: random.example.com should be BLOCKED (not in allowlist)
+	set +e
+	local resolve_blocked
+	resolve_blocked=$(docker exec "$test_container" nslookup random.example.com 2>&1)
+	local blocked_exit=$?
+	set -e
+
+	# Test 2: github.com should be ALLOWED (in allowlist)
+	set +e
+	local resolve_allowed
+	resolve_allowed=$(docker exec "$test_container" nslookup github.com 2>&1)
+	local allowed_exit=$?
+	set -e
+
+	# Cleanup
+	docker rm -f "$dns_container" "$test_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Verify: blocked domain should fail (NXDOMAIN, No answer, or 0.0.0.0)
+	local blocked_ok=false
+	# Convert to lowercase for case-insensitive matching
+	local resolve_blocked_lower
+	resolve_blocked_lower=$(echo "$resolve_blocked" | tr '[:upper:]' '[:lower:]')
+	if [[ $blocked_exit -ne 0 ]] || [[ "$resolve_blocked_lower" == *"nxdomain"* ]] || [[ "$resolve_blocked_lower" == *"can't find"* ]] || [[ "$resolve_blocked_lower" == *"no answer"* ]] || [[ "$resolve_blocked" == *"0.0.0.0"* ]]; then
+		blocked_ok=true
+	fi
+
+	# Verify: allowed domain should resolve successfully
+	local allowed_ok=false
+	if [[ $allowed_exit -eq 0 ]] && [[ "$resolve_allowed" == *"Address"* ]] && [[ "$resolve_allowed" != *"0.0.0.0"* ]]; then
+		allowed_ok=true
+	fi
+
+	if [[ "$blocked_ok" == true ]] && [[ "$allowed_ok" == true ]]; then
+		log_pass "Strict profile DNS allowlist: blocks unknown domains, allows whitelisted"
+	else
+		if [[ "$blocked_ok" != true ]]; then
+			log_fail "Strict profile should block random.example.com but resolution succeeded"
+			echo "Blocked domain output: $resolve_blocked"
+		fi
+		if [[ "$allowed_ok" != true ]]; then
+			log_fail "Strict profile should allow github.com but resolution failed"
+			echo "Allowed domain output: $resolve_allowed"
+		fi
+		return 1
+	fi
+}
+
+test_standard_profile_allows_whitelisted_domains() {
+	log_test "Testing standard profile allows npm registry (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker is not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	local test_name="devbox-test-allow-$$"
+	local network_name="${test_name}-net"
+	local dns_container="${test_name}-dns"
+	local test_container="${test_name}-app"
+
+	# Cleanup any existing resources
+	docker rm -f "$dns_container" "$test_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Create isolated network
+	if ! docker network create --driver bridge "$network_name" >/dev/null 2>&1; then
+		log_fail "Failed to create test network"
+		return 1
+	fi
+
+	# DNS proxy config for standard mode (DEFAULT_ACTION=accept):
+	# - Only block specific domains (pastebin)
+	# - Allow everything else
+	local dns_config="address=/pastebin.com/#"
+
+	if ! docker run -d \
+		--name "$dns_container" \
+		--network "$network_name" \
+		alpine:latest \
+		sh -c "apk add --no-cache dnsmasq >/dev/null 2>&1 && echo 'server=8.8.8.8' > /etc/dnsmasq.conf && echo 'server=1.1.1.1' >> /etc/dnsmasq.conf && echo '$dns_config' >> /etc/dnsmasq.conf && dnsmasq -k -C /etc/dnsmasq.conf" >/dev/null 2>&1; then
+		log_fail "Failed to start DNS proxy container"
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Wait for dnsmasq to start
+	sleep 3
+
+	# Get DNS proxy IP
+	local dns_ip
+	dns_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$dns_container" 2>/dev/null)
+
+	if [[ -z "$dns_ip" ]]; then
+		log_fail "Could not get DNS proxy IP"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Create test container using DNS proxy
+	if ! docker run -d \
+		--name "$test_container" \
+		--network "$network_name" \
+		--dns "$dns_ip" \
+		alpine:latest sleep 60 >/dev/null 2>&1; then
+		log_fail "Failed to create test container"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Install nslookup in test container
+	docker exec "$test_container" apk add --no-cache bind-tools >/dev/null 2>&1 || true
+
+	# Test: registry.npmjs.org should resolve (allowed domain in standard profile)
+	set +e
+	local resolve_result
+	resolve_result=$(docker exec "$test_container" nslookup registry.npmjs.org 2>&1)
+	local resolve_exit=$?
+	set -e
+
+	# Cleanup
+	docker rm -f "$dns_container" "$test_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Verify: npm registry should resolve successfully
+	if [[ $resolve_exit -eq 0 ]] && [[ "$resolve_result" == *"Address"* ]] && [[ "$resolve_result" != *"NXDOMAIN"* ]]; then
+		log_pass "Standard profile allows npm registry (registry.npmjs.org resolves)"
+	else
+		log_fail "Standard profile should allow registry.npmjs.org"
+		echo "Resolve output: $resolve_result"
+		return 1
+	fi
+}
+
 # ============================================================================
 # Test: lib/network.sh helper library
 # ============================================================================
@@ -1168,6 +1386,8 @@ main() {
 	test_standard_integration_creates_dns_proxy || true
 	test_standard_integration_blocks_pastebin || true
 	test_dns_proxy_cleanup_on_rm || true
+	test_strict_profile_dns_allowlist || true
+	test_standard_profile_allows_whitelisted_domains || true
 
 	# Summary
 	echo

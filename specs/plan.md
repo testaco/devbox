@@ -451,8 +451,10 @@ Control outbound network access from devbox containers with security profiles an
 - [x] DNS proxy using alpine + dnsmasq (inline container, no separate Dockerfile needed)
 - [x] Block domains via dnsmasq address=/#domain/# syntax
 - [x] Configure container to use DNS proxy as resolver (--dns flag)
+- [x] Implement domain allowlist via dnsmasq configuration for strict profile
+  - When `DEFAULT_ACTION="drop"`: blocks all domains by default (`address=/#/`), allows only whitelisted domains (`server=/domain/upstream`)
+  - When `DEFAULT_ACTION="accept"`: allows all domains, blocks only specific domains (standard mode)
 - [ ] Create dedicated `docker/dns-proxy/Dockerfile` for production (TODO: future enhancement)
-- [ ] Implement domain allowlist via dnsmasq configuration (TODO: future enhancement)
 - [ ] Log blocked DNS queries for audit (TODO: future enhancement)
 
 ### iptables Integration
@@ -492,7 +494,8 @@ Control outbound network access from devbox containers with security profiles an
 - [x] Test standard mode creates DNS proxy container
 - [x] Test standard mode blocks pastebin.com (via DNS proxy NXDOMAIN)
 - [x] Test DNS proxy and network cleanup on container removal
-- [ ] Test standard mode allows package manager domains (TODO: future enhancement)
+- [x] Test strict profile DNS allowlist blocks non-whitelisted domains
+- [x] Test standard mode allows package manager domains (registry.npmjs.org resolves)
 - [ ] Test `--allow-domain` adds custom domain access (TODO: future enhancement)
 - [ ] Test DNS proxy logs queries (TODO: future enhancement)
 - [ ] Test iptables rules applied correctly (TODO: when iptables rules implemented)

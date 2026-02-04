@@ -174,42 +174,84 @@ create_container_network() {
 }
 
 # Start DNS proxy sidecar for domain filtering
-# Usage: start_dns_proxy <container_name> <allowed_domains> <blocked_domains>
+# Usage: start_dns_proxy <container_name> <allowed_domains> <blocked_domains> [default_action]
 # Returns DNS proxy IP address on success (empty string means no filtering needed)
+#
+# When default_action="drop" (strict mode):
+#   - Block all domains by default (address=/#/)
+#   - Only allow queries to explicitly whitelisted domains (server=/domain/upstream)
+#
+# When default_action="accept" (standard mode, default):
+#   - Allow all domains by default
+#   - Block specific domains (address=/domain/#)
 start_dns_proxy() {
 	local container_name="$1"
 	local allowed_domains="$2"
 	local blocked_domains="$3"
+	local default_action="${4:-accept}"
 	local dns_container="${container_name}-dns"
 	local network_name="${container_name}-net"
 
 	# Remove any existing DNS container first
 	docker rm -f "$dns_container" >/dev/null 2>&1 || true
 
-	# Create dnsmasq configuration for blocked domains
+	# Create dnsmasq configuration based on default action
 	local dns_config=""
 
-	# Add blocked domains (return NXDOMAIN via address=/#)
-	for domain in $blocked_domains; do
-		# Skip comments and empty lines
-		[[ "$domain" =~ ^#.*$ ]] && continue
-		[[ -z "$domain" ]] && continue
-		# Handle wildcards - dnsmasq uses address=/domain/# syntax
-		# Remove leading *. if present
-		domain="${domain#\*.}"
-		dns_config="${dns_config}address=/${domain}/#\n"
-	done
+	if [[ "$default_action" == "drop" ]]; then
+		# ALLOWLIST MODE: Block everything by default, only allow whitelisted domains
+		# address=/#/ returns NXDOMAIN for all domains not explicitly allowed
+		dns_config="# Allowlist mode: block all domains by default\naddress=/#/\n\n"
+		dns_config="${dns_config}# Allowed domains - forward to upstream DNS\n"
+
+		# Add allowed domains (forward to upstream DNS)
+		for domain in $allowed_domains; do
+			# Skip comments and empty lines
+			[[ "$domain" =~ ^#.*$ ]] && continue
+			[[ -z "$domain" ]] && continue
+			# Handle wildcards - remove leading *. if present
+			domain="${domain#\*.}"
+			# Forward queries for this domain to upstream DNS
+			dns_config="${dns_config}server=/${domain}/8.8.8.8\n"
+			dns_config="${dns_config}server=/${domain}/1.1.1.1\n"
+		done
+
+		# Also add blocked domains explicitly (for extra safety, in case upstream resolves them)
+		if [[ -n "$blocked_domains" ]]; then
+			dns_config="${dns_config}\n# Explicitly blocked domains (additional safety)\n"
+			for domain in $blocked_domains; do
+				[[ "$domain" =~ ^#.*$ ]] && continue
+				[[ -z "$domain" ]] && continue
+				domain="${domain#\*.}"
+				dns_config="${dns_config}address=/${domain}/#\n"
+			done
+		fi
+	else
+		# BLOCKLIST MODE: Allow everything by default, block specific domains
+		dns_config="# Blocklist mode: allow all, block specific domains\n"
+
+		# Add blocked domains (return NXDOMAIN via address=/#)
+		for domain in $blocked_domains; do
+			# Skip comments and empty lines
+			[[ "$domain" =~ ^#.*$ ]] && continue
+			[[ -z "$domain" ]] && continue
+			# Handle wildcards - dnsmasq uses address=/domain/# syntax
+			# Remove leading *. if present
+			domain="${domain#\*.}"
+			dns_config="${dns_config}address=/${domain}/#\n"
+		done
+	fi
 
 	# Start dnsmasq container
-	# Using alpine with dnsmasq, configure to:
-	# - Block specified domains (return NXDOMAIN)
-	# - Forward all other queries to upstream DNS (8.8.8.8, 1.1.1.1)
+	# Using alpine with dnsmasq, configure to apply the generated rules
+	# and forward unblocked queries to upstream DNS (8.8.8.8, 1.1.1.1)
 	local dns_id
 	if ! dns_id=$(docker run -d \
 		--name "$dns_container" \
 		--network "$network_name" \
 		--label "devbox.container=$container_name" \
 		--label "devbox.type=dns-proxy" \
+		--label "devbox.dns.mode=$default_action" \
 		--restart unless-stopped \
 		alpine:latest \
 		sh -c "apk add --no-cache dnsmasq >/dev/null 2>&1 && mkdir -p /etc/dnsmasq.d && echo -e '$dns_config' > /etc/dnsmasq.d/devbox.conf && echo 'server=8.8.8.8' >> /etc/dnsmasq.conf && echo 'server=1.1.1.1' >> /etc/dnsmasq.conf && dnsmasq -k --log-queries --log-facility=-" 2>&1); then
