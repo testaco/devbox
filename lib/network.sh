@@ -303,18 +303,25 @@ get_dns_proxy_ip() {
 }
 
 # Restart DNS proxy with new profile configuration
-# Usage: restart_dns_proxy <container_name> <profile> [static_ip] [profiles_dir]
+# Usage: restart_dns_proxy <container_name> <profile> [static_ip] [profiles_dir] [apply_custom_rules]
 # Preserves IP address to maintain connectivity for existing containers
+# If apply_custom_rules is "true", also applies custom rules from container labels
 # Returns new DNS proxy IP on success, empty on failure
 restart_dns_proxy() {
 	local container_name="$1"
 	local profile="$2"
 	local static_ip="${3:-}"
 	local profiles_dir="${4:-$PROJECT_ROOT/profiles}"
+	local apply_custom_rules="${5:-false}"
 
 	# Load profile configuration
 	if ! load_egress_profile "$profile" "$profiles_dir"; then
 		return 1
+	fi
+
+	# Apply custom rules from container labels if requested
+	if [[ "$apply_custom_rules" == "true" ]]; then
+		apply_custom_rules_from_labels "$container_name"
 	fi
 
 	# For profiles that don't need DNS proxy, just return success
@@ -406,6 +413,157 @@ format_egress_config() {
 		count=$(echo "$EGRESS_BLOCKED_DOMAINS" | tr '\n' ' ' | wc -w)
 		echo "  Blocked domains: $count domain patterns"
 	fi
+}
+
+# Get the egress rules directory for a container
+# Usage: get_egress_rules_dir <container_name>
+# Returns the path to the egress rules directory
+get_egress_rules_dir() {
+	local container_name="$1"
+	local devbox_dir="${DEVBOX_DATA_DIR:-$HOME/.devbox}"
+	echo "$devbox_dir/egress-rules/$container_name"
+}
+
+# Store a custom egress rule for a container
+# Usage: store_egress_rule <container_name> <rule_type> <value>
+# rule_type: allow-domain, block-domain, allow-ip, block-ip, allow-port
+store_egress_rule() {
+	local container_name="$1"
+	local rule_type="$2"
+	local value="$3"
+
+	local rules_dir
+	rules_dir=$(get_egress_rules_dir "$container_name")
+
+	# Create directory if it doesn't exist
+	mkdir -p "$rules_dir"
+
+	local rule_file="$rules_dir/${rule_type}s.txt"
+
+	# Check if rule already exists
+	if [[ -f "$rule_file" ]] && grep -qxF "$value" "$rule_file" 2>/dev/null; then
+		return 0 # Already exists
+	fi
+
+	# Append the rule
+	echo "$value" >>"$rule_file"
+	return 0
+}
+
+# Get custom egress rules from files
+# Usage: get_custom_egress_rules_from_labels <container_name>
+# Note: Named for backwards compatibility, but reads from files not labels
+# Outputs rules in format suitable for parsing:
+#   ALLOW_DOMAIN domain1
+#   ALLOW_DOMAIN domain2
+#   BLOCK_DOMAIN domain1
+#   ALLOW_IP 10.0.0.0/8
+#   BLOCK_IP 192.168.0.0/16
+#   ALLOW_PORT 8080
+get_custom_egress_rules_from_labels() {
+	local container_name="$1"
+
+	local rules_dir
+	rules_dir=$(get_egress_rules_dir "$container_name")
+
+	# If rules directory doesn't exist, no custom rules
+	[[ ! -d "$rules_dir" ]] && return 0
+
+	# Read allow domains
+	if [[ -f "$rules_dir/allow-domains.txt" ]]; then
+		while IFS= read -r line; do
+			[[ -z "$line" ]] && continue
+			[[ "$line" =~ ^#.*$ ]] && continue
+			echo "ALLOW_DOMAIN $line"
+		done <"$rules_dir/allow-domains.txt"
+	fi
+
+	# Read block domains
+	if [[ -f "$rules_dir/block-domains.txt" ]]; then
+		while IFS= read -r line; do
+			[[ -z "$line" ]] && continue
+			[[ "$line" =~ ^#.*$ ]] && continue
+			echo "BLOCK_DOMAIN $line"
+		done <"$rules_dir/block-domains.txt"
+	fi
+
+	# Read allow IPs
+	if [[ -f "$rules_dir/allow-ips.txt" ]]; then
+		while IFS= read -r line; do
+			[[ -z "$line" ]] && continue
+			[[ "$line" =~ ^#.*$ ]] && continue
+			echo "ALLOW_IP $line"
+		done <"$rules_dir/allow-ips.txt"
+	fi
+
+	# Read block IPs
+	if [[ -f "$rules_dir/block-ips.txt" ]]; then
+		while IFS= read -r line; do
+			[[ -z "$line" ]] && continue
+			[[ "$line" =~ ^#.*$ ]] && continue
+			echo "BLOCK_IP $line"
+		done <"$rules_dir/block-ips.txt"
+	fi
+
+	# Read allow ports
+	if [[ -f "$rules_dir/allow-ports.txt" ]]; then
+		while IFS= read -r line; do
+			[[ -z "$line" ]] && continue
+			[[ "$line" =~ ^#.*$ ]] && continue
+			echo "ALLOW_PORT $line"
+		done <"$rules_dir/allow-ports.txt"
+	fi
+
+	return 0
+}
+
+# Cleanup egress rules files for a container
+# Usage: cleanup_egress_rules <container_name>
+cleanup_egress_rules() {
+	local container_name="$1"
+	local rules_dir
+	rules_dir=$(get_egress_rules_dir "$container_name")
+
+	if [[ -d "$rules_dir" ]]; then
+		rm -rf "$rules_dir"
+	fi
+}
+
+# Apply custom egress rules from container labels to loaded profile
+# Usage: apply_custom_rules_from_labels <container_name_or_id>
+# Must be called after load_egress_profile to modify EGRESS_* variables
+apply_custom_rules_from_labels() {
+	local container="$1"
+
+	local rules
+	rules=$(get_custom_egress_rules_from_labels "$container") || return 0
+
+	while IFS= read -r rule; do
+		[[ -z "$rule" ]] && continue
+
+		local rule_type="${rule%% *}"
+		local rule_value="${rule#* }"
+
+		case "$rule_type" in
+		ALLOW_DOMAIN)
+			EGRESS_ALLOWED_DOMAINS="$EGRESS_ALLOWED_DOMAINS $rule_value"
+			;;
+		BLOCK_DOMAIN)
+			EGRESS_BLOCKED_DOMAINS="$EGRESS_BLOCKED_DOMAINS $rule_value"
+			;;
+		ALLOW_IP)
+			EGRESS_ALLOWED_IPS="$EGRESS_ALLOWED_IPS $rule_value"
+			;;
+		BLOCK_IP)
+			EGRESS_BLOCKED_IPS="$EGRESS_BLOCKED_IPS $rule_value"
+			;;
+		ALLOW_PORT)
+			EGRESS_ALLOWED_PORTS="$EGRESS_ALLOWED_PORTS $rule_value"
+			;;
+		esac
+	done <<<"$rules"
+
+	return 0
 }
 
 # Get egress label value for container

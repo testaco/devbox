@@ -1636,6 +1636,45 @@ EOF
 		log_error "Failed to start container '$display_name'"
 		return 1
 	fi
+
+	# Re-apply egress rules if container uses DNS proxy
+	# Get the full container name for network resource lookup
+	local full_container_name
+	full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///')
+	local dns_container="${full_container_name}-dns"
+
+	# Check if DNS proxy exists for this container
+	if docker inspect "$dns_container" >/dev/null 2>&1; then
+		# Get the egress profile from container labels
+		local egress_profile
+		egress_profile=$(docker inspect --format '{{index .Config.Labels "devbox.egress"}}' "$container_id" 2>/dev/null || echo "")
+
+		if [[ -n "$egress_profile" ]] && [[ "$egress_profile" != "permissive" ]] && [[ "$egress_profile" != "airgapped" ]]; then
+			# Check if there are custom rules in labels
+			local has_custom_rules=false
+			local labels
+			labels=$(docker inspect --format '{{range $k, $v := .Config.Labels}}{{$k}}{{"\n"}}{{end}}' "$container_id" 2>/dev/null || echo "")
+			if echo "$labels" | grep -q "devbox.egress.allow\|devbox.egress.block"; then
+				has_custom_rules=true
+			fi
+
+			if [[ "$has_custom_rules" == "true" ]]; then
+				log_info "Re-applying custom egress rules..."
+
+				# Get current DNS proxy IP
+				local current_dns_ip
+				current_dns_ip=$(get_dns_proxy_ip "$full_container_name")
+
+				# Restart DNS proxy with custom rules applied
+				if restart_dns_proxy "$full_container_name" "$egress_profile" "$current_dns_ip" "$PROJECT_ROOT/profiles" "true" >/dev/null 2>&1; then
+					log_success "Custom egress rules re-applied"
+				else
+					log_warning "Failed to re-apply custom egress rules"
+					log_info "DNS proxy may need manual restart"
+				fi
+			fi
+		fi
+	fi
 }
 
 cmd_rm() {
@@ -1842,6 +1881,9 @@ EOF
 
 				# Cleanup network resources (DNS proxy container and custom network)
 				cleanup_network_resources "$full_container_name"
+
+				# Cleanup egress rule files
+				cleanup_egress_rules "$full_container_name"
 			else
 				log_error "Failed to remove container '$display_name'"
 				((failed_count++)) || true
@@ -1963,6 +2005,9 @@ EOF
 
 				# Cleanup network resources (DNS proxy container and custom network)
 				cleanup_network_resources "$full_container_name"
+
+				# Cleanup egress rule files
+				cleanup_egress_rules "$full_container_name"
 			fi
 		else
 			log_error "Failed to remove container '$display_name'"
@@ -3239,25 +3284,26 @@ EOF
 		return 0
 	fi
 
-	# Store rule in container label (for now, actual enforcement is TODO)
-	local timestamp
-	timestamp=$(date +%s)
+	# Get full container name for file storage
+	local full_container_name
+	full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///')
 
+	# Store rules in files using library function
 	if [[ -n "$domain" ]]; then
-		docker container update --label-add "devbox.egress.allow.domain.${timestamp}=$domain" "$container_id" >/dev/null
+		store_egress_rule "$full_container_name" "allow-domain" "$domain"
 		log_success "Added allow rule for domain: $domain"
 	fi
 	if [[ -n "$ip" ]]; then
-		docker container update --label-add "devbox.egress.allow.ip.${timestamp}=$ip" "$container_id" >/dev/null
+		store_egress_rule "$full_container_name" "allow-ip" "$ip"
 		log_success "Added allow rule for IP: $ip"
 	fi
 	if [[ -n "$port" ]]; then
-		docker container update --label-add "devbox.egress.allow.port.${timestamp}=$port" "$container_id" >/dev/null
+		store_egress_rule "$full_container_name" "allow-port" "$port"
 		log_success "Added allow rule for port: $port"
 	fi
 
-	log_warning "Note: Runtime rule enforcement is not yet implemented"
-	log_info "Rule will be applied on next container restart"
+	log_info "Rule stored. It will be applied on next container restart (stop then start)"
+	log_info "For immediate effect, run: devbox stop $container_name && devbox start $container_name"
 }
 
 cmd_network_block() {
@@ -3353,21 +3399,22 @@ EOF
 		return 0
 	fi
 
-	# Store rule in container label
-	local timestamp
-	timestamp=$(date +%s)
+	# Get full container name for file storage
+	local full_container_name
+	full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///')
 
+	# Store rules in files using library function
 	if [[ -n "$domain" ]]; then
-		docker container update --label-add "devbox.egress.block.domain.${timestamp}=$domain" "$container_id" >/dev/null
+		store_egress_rule "$full_container_name" "block-domain" "$domain"
 		log_success "Added block rule for domain: $domain"
 	fi
 	if [[ -n "$ip" ]]; then
-		docker container update --label-add "devbox.egress.block.ip.${timestamp}=$ip" "$container_id" >/dev/null
+		store_egress_rule "$full_container_name" "block-ip" "$ip"
 		log_success "Added block rule for IP: $ip"
 	fi
 
-	log_warning "Note: Runtime rule enforcement is not yet implemented"
-	log_info "Rule will be applied on next container restart"
+	log_info "Rule stored. It will be applied on next container restart (stop then start)"
+	log_info "For immediate effect, run: devbox stop $container_name && devbox start $container_name"
 }
 
 cmd_network_logs() {

@@ -467,13 +467,16 @@ Control outbound network access from devbox containers with security profiles an
 
 ### Container Labels
 - [x] Store egress profile in label: `devbox.egress`
-- [x] Store custom rules in labels: `devbox.egress.allow.*`, `devbox.egress.block.*`
+- [x] Store egress profile in label: `devbox.egress`
 - [x] Update `devbox list` to show EGRESS column
 
 ### Runtime Rule Persistence
-- [x] Store runtime-added rules in container labels
-- [ ] Re-apply rules on container restart (TODO: future enhancement)
-- [ ] Update DNS proxy allowlist dynamically (TODO: future enhancement)
+- [x] Store runtime-added rules in files at `~/.devbox/egress-rules/<container>/`
+  - Note: Docker doesn't support adding labels to running containers, so file-based storage is used
+  - Files: `allow-domains.txt`, `block-domains.txt`, `allow-ips.txt`, `block-ips.txt`, `allow-ports.txt`
+- [x] Re-apply rules on container restart via `devbox start`
+  - `cmd_start()` checks for custom rules and restarts DNS proxy with merged configuration
+- [ ] Update DNS proxy allowlist dynamically without restart (TODO: future enhancement)
 
 ### Cleanup Integration
 - [x] Update `cmd_rm` to remove container network (via cleanup_network_resources)
@@ -502,6 +505,8 @@ Control outbound network access from devbox containers with security profiles an
 - [x] Test `devbox network reset --dry-run` shows what would be done
 - [x] Test `devbox network reset` recreates DNS proxy with profile defaults
 - [x] Test `restart_dns_proxy` preserves IP address for connectivity
+- [x] Test `get_custom_egress_rules_from_labels` reads rules from files
+- [x] Test `devbox start` re-applies custom egress rules after stop/start cycle
 - [ ] Test DNS proxy logs queries (TODO: future enhancement)
 - [ ] Test iptables rules applied correctly (TODO: when iptables rules implemented)
 

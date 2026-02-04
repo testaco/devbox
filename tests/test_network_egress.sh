@@ -1746,6 +1746,178 @@ test_restart_dns_proxy_preserves_ip() {
 }
 
 # ============================================================================
+# Test: Custom egress rules re-application on container start
+# ============================================================================
+
+test_network_lib_has_get_custom_rules_function() {
+	log_test "Testing lib/network.sh has get_custom_egress_rules_from_labels function"
+	((TESTS_RUN++)) || true
+
+	local content
+	content=$(cat "$PROJECT_ROOT/lib/network.sh")
+
+	if [[ "$content" == *"get_custom_egress_rules_from_labels"* ]]; then
+		log_pass "lib/network.sh has get_custom_egress_rules_from_labels function"
+	else
+		log_fail "lib/network.sh missing get_custom_egress_rules_from_labels function"
+		return 1
+	fi
+}
+
+test_get_custom_rules_from_labels() {
+	log_test "Testing get_custom_egress_rules_from_labels reads rules from files"
+	((TESTS_RUN++)) || true
+
+	local test_container="devbox-test-customrules-$$"
+
+	# Source network library
+	export PROJECT_ROOT="$PROJECT_ROOT"
+	# shellcheck source=/dev/null
+	source "$PROJECT_ROOT/lib/network.sh"
+
+	# Create egress rules directory and files
+	local rules_dir
+	rules_dir=$(get_egress_rules_dir "$test_container")
+	mkdir -p "$rules_dir"
+	echo "custom.example.com" >"$rules_dir/allow-domains.txt"
+	echo "blocked.example.com" >"$rules_dir/block-domains.txt"
+	echo "10.0.0.0/8" >"$rules_dir/allow-ips.txt"
+
+	# Call the function
+	local output
+	if output=$(get_custom_egress_rules_from_labels "$test_container" 2>&1); then
+		# Cleanup
+		rm -rf "$rules_dir"
+
+		# Verify output contains expected domains
+		if [[ "$output" == *"custom.example.com"* ]] && [[ "$output" == *"blocked.example.com"* ]] && [[ "$output" == *"10.0.0.0/8"* ]]; then
+			log_pass "get_custom_egress_rules_from_labels reads rules from files correctly"
+		else
+			log_fail "Output missing expected values: $output"
+			return 1
+		fi
+	else
+		rm -rf "$rules_dir"
+		log_fail "Function failed: $output"
+		return 1
+	fi
+}
+
+test_start_reapplies_custom_egress_rules() {
+	log_test "Testing 'devbox start' re-applies custom egress rules (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker is not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	local test_name="devbox-test-reapply-$$"
+	local container_name="${CONTAINER_PREFIX}test-${test_name}"
+	local dns_container="${container_name}-dns"
+	local network_name="${container_name}-net"
+
+	# Cleanup any existing resources
+	docker rm -f "$container_name" "$dns_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Create a container with strict profile (blocks all by default)
+	# We'll add custom.httpbin.org via 'network allow' and verify it works after restart
+	if ! output=$("$DEVBOX_BIN" create "test-${test_name}" "testaco/test-repo" \
+		--github-secret test-github-secret \
+		--claude-code-secret test-claude-secret \
+		--egress strict \
+		2>&1); then
+		log_fail "Failed to create container: $output"
+		return 1
+	fi
+
+	# Wait for container to be ready
+	sleep 3
+
+	# Add a custom allow rule for httpbin.org
+	if ! "$DEVBOX_BIN" network allow "test-${test_name}" --domain httpbin.org 2>&1; then
+		log_fail "Failed to add allow rule"
+		docker rm -f "$container_name" "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Verify the rule was stored in file
+	local rules_dir
+	rules_dir=$(get_egress_rules_dir "$container_name")
+	if [[ ! -f "$rules_dir/allow-domains.txt" ]] || ! grep -q "httpbin.org" "$rules_dir/allow-domains.txt" 2>/dev/null; then
+		log_fail "Custom rule not stored in file"
+		docker rm -f "$container_name" "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Stop the container
+	"$DEVBOX_BIN" stop "test-${test_name}" >/dev/null 2>&1
+
+	# Start the container (this should re-apply the custom rules)
+	if ! "$DEVBOX_BIN" start "test-${test_name}" >/dev/null 2>&1; then
+		log_fail "Failed to start container"
+		docker rm -f "$container_name" "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Wait for container and DNS proxy to be ready
+	sleep 5
+
+	# Install nslookup in the container (devbox uses Debian, not Alpine, need root for apt)
+	docker exec -u root "$container_name" sh -c "command -v nslookup >/dev/null 2>&1 || (apt-get update && apt-get install -y dnsutils) >/dev/null 2>&1" || true
+
+	# Test that httpbin.org resolves (custom allowed domain)
+	set +e
+	local resolve_allowed
+	resolve_allowed=$(docker exec "$container_name" nslookup httpbin.org 2>&1)
+	local allowed_exit=$?
+	set -e
+
+	# Test that random.example.com does NOT resolve (strict profile blocks unknown)
+	set +e
+	local resolve_blocked
+	resolve_blocked=$(docker exec "$container_name" nslookup random.example.com 2>&1)
+	local blocked_exit=$?
+	set -e
+
+	# Cleanup
+	"$DEVBOX_BIN" rm --force "test-${test_name}" >/dev/null 2>&1 || true
+
+	# Verify allowed domain resolves
+	local allowed_ok=false
+	if [[ $allowed_exit -eq 0 ]] && [[ "$resolve_allowed" == *"Address"* ]] && [[ "$resolve_allowed" != *"0.0.0.0"* ]]; then
+		allowed_ok=true
+	fi
+
+	# Verify blocked domain fails
+	local blocked_ok=false
+	local resolve_blocked_lower
+	resolve_blocked_lower=$(echo "$resolve_blocked" | tr '[:upper:]' '[:lower:]')
+	if [[ $blocked_exit -ne 0 ]] || [[ "$resolve_blocked_lower" == *"nxdomain"* ]] || [[ "$resolve_blocked_lower" == *"can't find"* ]] || [[ "$resolve_blocked_lower" == *"no answer"* ]] || [[ "$resolve_blocked" == *"0.0.0.0"* ]]; then
+		blocked_ok=true
+	fi
+
+	if [[ "$allowed_ok" == true ]] && [[ "$blocked_ok" == true ]]; then
+		log_pass "'devbox start' re-applies custom egress rules (httpbin.org allowed, random blocked)"
+	else
+		if [[ "$allowed_ok" != true ]]; then
+			log_fail "Custom allowed domain (httpbin.org) not accessible after restart"
+			echo "Resolve output: $resolve_allowed"
+		fi
+		if [[ "$blocked_ok" != true ]]; then
+			log_fail "Blocked domain should not resolve but did"
+			echo "Resolve output: $resolve_blocked"
+		fi
+		return 1
+	fi
+}
+
+# ============================================================================
 # Main test runner
 # ============================================================================
 
@@ -1829,6 +2001,11 @@ main() {
 	test_network_reset_dry_run || true
 	test_network_reset_integration || true
 	test_restart_dns_proxy_preserves_ip || true
+
+	# Custom rules re-application tests
+	test_network_lib_has_get_custom_rules_function || true
+	test_get_custom_rules_from_labels || true
+	test_start_reapplies_custom_egress_rules || true
 
 	# Summary
 	echo
