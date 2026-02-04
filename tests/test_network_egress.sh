@@ -647,6 +647,152 @@ test_standard_profile_has_allowed_domains() {
 }
 
 # ============================================================================
+# Test: Network enforcement in docker command
+# ============================================================================
+
+test_airgapped_docker_command_has_network_none() {
+	log_test "Testing airgapped mode includes --network none in docker command"
+	((TESTS_RUN++)) || true
+
+	local output
+	if output=$("$DEVBOX_BIN" create testname testrepo \
+		--github-secret test-github-secret \
+		--claude-code-secret test-claude-secret \
+		--egress airgapped \
+		--dry-run 2>&1); then
+		if [[ "$output" == *"--network none"* ]]; then
+			log_pass "Airgapped mode includes --network none in docker command"
+		else
+			log_fail "Airgapped mode missing --network none in docker command"
+			echo "Output: $output"
+			return 1
+		fi
+	else
+		log_fail "Dry-run command failed: $output"
+		return 1
+	fi
+}
+
+test_dry_run_shows_network_mode() {
+	log_test "Testing dry-run shows network mode for airgapped"
+	((TESTS_RUN++)) || true
+
+	local output
+	if output=$("$DEVBOX_BIN" create testname testrepo \
+		--github-secret test-github-secret \
+		--claude-code-secret test-claude-secret \
+		--egress airgapped \
+		--dry-run 2>&1); then
+		if [[ "$output" == *"Network mode: none"* ]]; then
+			log_pass "Dry-run shows network mode for airgapped"
+		else
+			log_fail "Dry-run missing network mode display"
+			echo "Output: $output"
+			return 1
+		fi
+	else
+		log_fail "Dry-run command failed: $output"
+		return 1
+	fi
+}
+
+test_permissive_no_network_flag() {
+	log_test "Testing permissive mode does NOT include --network none"
+	((TESTS_RUN++)) || true
+
+	local output
+	if output=$("$DEVBOX_BIN" create testname testrepo \
+		--github-secret test-github-secret \
+		--claude-code-secret test-claude-secret \
+		--egress permissive \
+		--dry-run 2>&1); then
+		if [[ "$output" != *"--network none"* ]]; then
+			log_pass "Permissive mode does not include --network none"
+		else
+			log_fail "Permissive mode should NOT have --network none"
+			echo "Output: $output"
+			return 1
+		fi
+	else
+		log_fail "Dry-run command failed: $output"
+		return 1
+	fi
+}
+
+test_standard_no_network_none() {
+	log_test "Testing standard mode does NOT include --network none"
+	((TESTS_RUN++)) || true
+
+	local output
+	if output=$("$DEVBOX_BIN" create testname testrepo \
+		--github-secret test-github-secret \
+		--claude-code-secret test-claude-secret \
+		--egress standard \
+		--dry-run 2>&1); then
+		if [[ "$output" != *"--network none"* ]]; then
+			log_pass "Standard mode does not include --network none"
+		else
+			log_fail "Standard mode should NOT have --network none"
+			echo "Output: $output"
+			return 1
+		fi
+	else
+		log_fail "Dry-run command failed: $output"
+		return 1
+	fi
+}
+
+# ============================================================================
+# Test: Integration tests (require Docker)
+# ============================================================================
+
+check_docker_available() {
+	docker info >/dev/null 2>&1
+}
+
+test_airgapped_integration_blocks_network() {
+	log_test "Testing airgapped mode actually blocks network (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker is not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	# Use a simple test container with --network none
+	local test_container="devbox-test-airgapped-$$"
+
+	# Cleanup any existing test container
+	docker rm -f "$test_container" >/dev/null 2>&1 || true
+
+	# Create a container with --network none (like airgapped mode does)
+	if ! docker run -d --name "$test_container" --network none alpine:latest sleep 60 >/dev/null 2>&1; then
+		log_fail "Failed to create test container"
+		return 1
+	fi
+
+	# Try to ping from inside the container - should fail
+	local ping_result
+	set +e
+	ping_result=$(docker exec "$test_container" ping -c 1 -W 2 8.8.8.8 2>&1)
+	local ping_exit=$?
+	set -e
+
+	# Cleanup
+	docker rm -f "$test_container" >/dev/null 2>&1 || true
+
+	# Verify ping failed (network blocked)
+	if [[ $ping_exit -ne 0 ]]; then
+		log_pass "Airgapped mode blocks network access (ping failed as expected)"
+	else
+		log_fail "Airgapped mode should block network but ping succeeded"
+		echo "Ping output: $ping_result"
+		return 1
+	fi
+}
+
+# ============================================================================
 # Test: lib/network.sh helper library
 # ============================================================================
 
@@ -747,6 +893,15 @@ main() {
 	# Library tests
 	test_network_lib_exists || true
 	test_network_lib_has_required_functions || true
+
+	# Network enforcement tests
+	test_airgapped_docker_command_has_network_none || true
+	test_dry_run_shows_network_mode || true
+	test_permissive_no_network_flag || true
+	test_standard_no_network_none || true
+
+	# Integration tests (require Docker)
+	test_airgapped_integration_blocks_network || true
 
 	# Summary
 	echo

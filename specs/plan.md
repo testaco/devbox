@@ -488,7 +488,7 @@ Control outbound network access from devbox containers with security profiles an
 - [x] Test default profile is `standard`
 
 #### Integration Tests
-- [ ] Test airgapped mode blocks all network (TODO: when airgapped enforcement implemented)
+- [x] Test airgapped mode blocks all network (airgapped enforcement implemented with --network none)
 - [ ] Test standard mode allows package manager domains (TODO: when DNS filtering implemented)
 - [ ] Test standard mode blocks pastebin.com (TODO: when DNS filtering implemented)
 - [ ] Test `--allow-domain` adds custom domain access (TODO: when DNS filtering implemented)

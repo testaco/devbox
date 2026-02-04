@@ -915,6 +915,13 @@ EOF
 
 	# Build Docker run command
 	local docker_cmd="docker run -dit"
+
+	# Apply network mode from egress profile
+	# airgapped profile sets EGRESS_NETWORK_MODE="none" which means --network none
+	if [[ "$EGRESS_NETWORK_MODE" == "none" ]]; then
+		docker_cmd="$docker_cmd --network none"
+	fi
+
 	docker_cmd="$docker_cmd --name $full_container_name"
 	docker_cmd="$docker_cmd -v ${DEVBOX_VOLUME}:/devbox-credentials:ro"
 	docker_cmd="$docker_cmd -v ${full_container_name}-workspace:/workspace"
@@ -988,6 +995,9 @@ EOF
 			echo "  Sudo: disabled"
 		fi
 		echo "  Egress profile: $egress_profile"
+		if [[ -n "$EGRESS_NETWORK_MODE" ]]; then
+			echo "  Network mode: $EGRESS_NETWORK_MODE"
+		fi
 		if [[ ${#allow_domains[@]} -gt 0 ]]; then
 			echo "  Additional allowed domains: ${allow_domains[*]}"
 		fi
