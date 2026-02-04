@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DEVBOX_BIN="$PROJECT_ROOT/bin/devbox"
+CONTAINER_PREFIX="devbox-"
 
 # Colors for test output
 RED='\033[0;31m'
@@ -1426,7 +1427,7 @@ test_network_lib_has_required_functions() {
 		content=$(cat "$PROJECT_ROOT/lib/network.sh")
 		local all_found=true
 
-		for func in load_egress_profile create_container_network cleanup_network_resources; do
+		for func in load_egress_profile create_container_network cleanup_network_resources restart_dns_proxy; do
 			if [[ "$content" != *"$func()"* ]]; then
 				log_fail "Function $func() not found in lib/network.sh"
 				all_found=false
@@ -1438,6 +1439,297 @@ test_network_lib_has_required_functions() {
 		fi
 	else
 		log_fail "lib/network.sh not found"
+		return 1
+	fi
+}
+
+# ============================================================================
+# Network Reset Tests
+# ============================================================================
+
+# Test: devbox network reset --help
+test_network_reset_help() {
+	log_test "Testing 'devbox network reset --help'"
+	((TESTS_RUN++)) || true
+
+	local output
+	output=$("$DEVBOX_BIN" network reset --help 2>&1)
+
+	if [[ "$output" == *"Reset egress rules"* ]] && [[ "$output" == *"--profile"* ]] && [[ "$output" == *"--force"* ]]; then
+		log_pass "'devbox network reset' help displays options"
+	else
+		log_fail "'devbox network reset' help should show options"
+		echo "Output: $output"
+		return 1
+	fi
+}
+
+# Test: devbox network reset requires container name
+test_network_reset_requires_container() {
+	log_test "Testing 'devbox network reset' requires container name"
+	((TESTS_RUN++)) || true
+
+	set +e
+	local output
+	output=$("$DEVBOX_BIN" network reset 2>&1)
+	local exit_code=$?
+	set -e
+
+	if [[ $exit_code -ne 0 ]] && [[ "$output" == *"Container name required"* ]]; then
+		log_pass "'devbox network reset' requires container name"
+	else
+		log_fail "'devbox network reset' should require container name"
+		echo "Output: $output"
+		return 1
+	fi
+}
+
+# Test: devbox network reset dry-run shows what would be done
+test_network_reset_dry_run() {
+	log_test "Testing 'devbox network reset --dry-run'"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping test"
+		return 0
+	fi
+
+	local test_name="devbox-test-resetdry-$$"
+	local container_name="${test_name}"
+	local full_container="${CONTAINER_PREFIX}${test_name}"
+
+	# Cleanup any existing container
+	docker rm -f "$full_container" "${full_container}-dns" >/dev/null 2>&1 || true
+	docker network rm "${full_container}-net" >/dev/null 2>&1 || true
+
+	# Create a container with standard profile (has DNS proxy)
+	# Use a simple alpine container for testing
+	docker network create "${full_container}-net" >/dev/null 2>&1 || true
+	if ! docker run -d --name "$full_container" \
+		--network "${full_container}-net" \
+		--label "devbox.egress=standard" \
+		alpine:latest sleep 60 >/dev/null 2>&1; then
+		log_fail "Failed to create test container"
+		docker network rm "${full_container}-net" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Test dry-run
+	local output
+	output=$("$DEVBOX_BIN" network reset "$test_name" --dry-run 2>&1)
+
+	# Cleanup
+	docker rm -f "$full_container" >/dev/null 2>&1 || true
+	docker network rm "${full_container}-net" >/dev/null 2>&1 || true
+
+	if [[ "$output" == *"Would reset egress rules"* ]] && [[ "$output" == *"Current profile"* ]]; then
+		log_pass "'devbox network reset --dry-run' shows what would be done"
+	else
+		log_fail "'devbox network reset --dry-run' should show reset info"
+		echo "Output: $output"
+		return 1
+	fi
+}
+
+# Test: devbox network reset actually resets DNS proxy (integration)
+test_network_reset_integration() {
+	log_test "Testing 'devbox network reset' recreates DNS proxy (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	local test_name="devbox-test-reset-int-$$"
+	local network_name="${test_name}-net"
+	local dns_container="${test_name}-dns"
+	local main_container="${test_name}-app"
+	local full_container="${CONTAINER_PREFIX}${test_name}"
+
+	# Cleanup any existing resources
+	docker rm -f "$full_container" "${full_container}-dns" "$dns_container" "$main_container" >/dev/null 2>&1 || true
+	docker network rm "${full_container}-net" "$network_name" >/dev/null 2>&1 || true
+
+	# Source the network library
+	export PROJECT_ROOT="$PROJECT_ROOT"
+	# shellcheck source=/dev/null
+	source "$PROJECT_ROOT/lib/network.sh"
+
+	# Create network
+	if ! docker network create "$network_name" >/dev/null 2>&1; then
+		log_fail "Failed to create test network"
+		return 1
+	fi
+
+	# Start DNS proxy with a config that blocks example.com
+	# (simulating custom block rule)
+	local custom_dns_config="address=/example.com/#"
+	if ! docker run -d \
+		--name "$dns_container" \
+		--network "$network_name" \
+		alpine:latest \
+		sh -c "apk add --no-cache dnsmasq >/dev/null 2>&1 && echo '$custom_dns_config' > /etc/dnsmasq.conf && echo 'server=8.8.8.8' >> /etc/dnsmasq.conf && dnsmasq -k" >/dev/null 2>&1; then
+		log_fail "Failed to start initial DNS proxy"
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	sleep 2
+
+	# Get DNS proxy IP
+	local dns_ip
+	dns_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$dns_container" 2>/dev/null)
+
+	if [[ -z "$dns_ip" ]]; then
+		log_fail "Could not get DNS proxy IP"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Create main container using DNS proxy
+	if ! docker run -d \
+		--name "$main_container" \
+		--network "$network_name" \
+		--dns "$dns_ip" \
+		--label "devbox=true" \
+		--label "devbox.egress=standard" \
+		alpine:latest sleep 120 >/dev/null 2>&1; then
+		log_fail "Failed to create main container"
+		docker rm -f "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Install nslookup
+	docker exec "$main_container" apk add --no-cache bind-tools >/dev/null 2>&1 || true
+
+	# Verify example.com is initially blocked (custom rule)
+	set +e
+	local before_reset
+	before_reset=$(docker exec "$main_container" nslookup example.com 2>&1)
+	local before_exit=$?
+	set -e
+
+	local before_blocked=false
+	local before_lower
+	before_lower=$(echo "$before_reset" | tr '[:upper:]' '[:lower:]')
+	if [[ $before_exit -ne 0 ]] || [[ "$before_lower" == *"nxdomain"* ]] || [[ "$before_lower" == *"can't find"* ]]; then
+		before_blocked=true
+	fi
+
+	# Now restart the DNS proxy with standard profile defaults (should allow example.com)
+	# Load standard profile
+	if ! load_egress_profile "standard" "$PROJECT_ROOT/profiles"; then
+		log_fail "Failed to load standard profile"
+		docker rm -f "$main_container" "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Restart DNS proxy with standard profile and same IP
+	local new_ip
+	new_ip=$(restart_dns_proxy "$test_name" "standard" "$dns_ip" "$PROJECT_ROOT/profiles")
+
+	if [[ -z "$new_ip" ]]; then
+		log_fail "Failed to restart DNS proxy"
+		docker rm -f "$main_container" "$dns_container" >/dev/null 2>&1 || true
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	sleep 2
+
+	# Verify example.com is now resolvable (standard profile allows it)
+	set +e
+	local after_reset
+	after_reset=$(docker exec "$main_container" nslookup example.com 2>&1)
+	local after_exit=$?
+	set -e
+
+	# Cleanup
+	docker rm -f "$main_container" "$dns_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Check results:
+	# - Before reset: example.com should be blocked (or we just verify after works)
+	# - After reset: example.com should resolve
+	if [[ $after_exit -eq 0 ]] && [[ "$after_reset" == *"Address"* ]]; then
+		# The key test: after reset with standard profile, example.com resolves
+		if [[ "$before_blocked" == true ]]; then
+			log_pass "Network reset: DNS proxy recreated, example.com now resolves (was blocked before)"
+		else
+			log_pass "Network reset: DNS proxy recreated with standard profile, example.com resolves"
+		fi
+	else
+		log_fail "After reset, example.com should resolve with standard profile"
+		echo "Before reset output: $before_reset"
+		echo "After reset output: $after_reset"
+		return 1
+	fi
+}
+
+# Test: restart_dns_proxy preserves IP address
+test_restart_dns_proxy_preserves_ip() {
+	log_test "Testing restart_dns_proxy preserves IP address (integration)"
+	((TESTS_RUN++)) || true
+
+	# Skip if Docker not available
+	if ! check_docker_available; then
+		log_skip "Docker not available, skipping integration test"
+		return 0
+	fi
+
+	local test_name="devbox-test-ippreserve-$$"
+	local network_name="${test_name}-net"
+	local dns_container="${test_name}-dns"
+
+	# Cleanup
+	docker rm -f "$dns_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	# Source network library
+	export PROJECT_ROOT="$PROJECT_ROOT"
+	# shellcheck source=/dev/null
+	source "$PROJECT_ROOT/lib/network.sh"
+
+	# Create network
+	if ! docker network create "$network_name" >/dev/null 2>&1; then
+		log_fail "Failed to create test network"
+		return 1
+	fi
+
+	# Start initial DNS proxy with standard profile
+	if ! load_egress_profile "standard" "$PROJECT_ROOT/profiles"; then
+		log_fail "Failed to load standard profile"
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	local initial_ip
+	initial_ip=$(start_dns_proxy "$test_name" "$EGRESS_ALLOWED_DOMAINS" "$EGRESS_BLOCKED_DOMAINS" "$EGRESS_DEFAULT_ACTION")
+
+	if [[ -z "$initial_ip" ]]; then
+		log_fail "Failed to start initial DNS proxy"
+		docker network rm "$network_name" >/dev/null 2>&1 || true
+		return 1
+	fi
+
+	# Restart DNS proxy with same IP
+	local restarted_ip
+	restarted_ip=$(restart_dns_proxy "$test_name" "standard" "$initial_ip" "$PROJECT_ROOT/profiles")
+
+	# Cleanup
+	docker rm -f "$dns_container" >/dev/null 2>&1 || true
+	docker network rm "$network_name" >/dev/null 2>&1 || true
+
+	if [[ "$restarted_ip" == "$initial_ip" ]]; then
+		log_pass "restart_dns_proxy preserves IP address ($initial_ip)"
+	else
+		log_fail "IP address changed: $initial_ip -> $restarted_ip"
 		return 1
 	fi
 }
@@ -1519,6 +1811,13 @@ main() {
 	test_strict_profile_dns_allowlist || true
 	test_standard_profile_allows_whitelisted_domains || true
 	test_allow_domain_integration || true
+
+	# Network reset tests
+	test_network_reset_help || true
+	test_network_reset_requires_container || true
+	test_network_reset_dry_run || true
+	test_network_reset_integration || true
+	test_restart_dns_proxy_preserves_ip || true
 
 	# Summary
 	echo

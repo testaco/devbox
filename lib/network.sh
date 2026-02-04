@@ -174,7 +174,7 @@ create_container_network() {
 }
 
 # Start DNS proxy sidecar for domain filtering
-# Usage: start_dns_proxy <container_name> <allowed_domains> <blocked_domains> [default_action]
+# Usage: start_dns_proxy <container_name> <allowed_domains> <blocked_domains> [default_action] [static_ip]
 # Returns DNS proxy IP address on success (empty string means no filtering needed)
 #
 # When default_action="drop" (strict mode):
@@ -184,11 +184,16 @@ create_container_network() {
 # When default_action="accept" (standard mode, default):
 #   - Allow all domains by default
 #   - Block specific domains (address=/domain/#)
+#
+# When static_ip is provided (for restart scenarios):
+#   - DNS proxy is assigned the specified IP address
+#   - This preserves connectivity for containers using --dns pointing to the old proxy
 start_dns_proxy() {
 	local container_name="$1"
 	local allowed_domains="$2"
 	local blocked_domains="$3"
 	local default_action="${4:-accept}"
+	local static_ip="${5:-}"
 	local dns_container="${container_name}-dns"
 	local network_name="${container_name}-net"
 
@@ -245,10 +250,20 @@ start_dns_proxy() {
 	# Start dnsmasq container
 	# Using alpine with dnsmasq, configure to apply the generated rules
 	# and forward unblocked queries to upstream DNS (8.8.8.8, 1.1.1.1)
+
+	# Build IP flag for static IP assignment (used in restart scenarios)
+	local ip_flag=""
+	if [[ -n "$static_ip" ]]; then
+		ip_flag="--ip $static_ip"
+	fi
+
 	local dns_id
+	# Note: $ip_flag is intentionally unquoted to allow it to be empty or expand to --ip <value>
+	# shellcheck disable=SC2086
 	if ! dns_id=$(docker run -d \
 		--name "$dns_container" \
 		--network "$network_name" \
+		$ip_flag \
 		--label "devbox.container=$container_name" \
 		--label "devbox.type=dns-proxy" \
 		--label "devbox.dns.mode=$default_action" \
@@ -285,6 +300,57 @@ get_dns_proxy_ip() {
 	local dns_container="${container_name}-dns"
 
 	docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$dns_container" 2>/dev/null
+}
+
+# Restart DNS proxy with new profile configuration
+# Usage: restart_dns_proxy <container_name> <profile> [static_ip] [profiles_dir]
+# Preserves IP address to maintain connectivity for existing containers
+# Returns new DNS proxy IP on success, empty on failure
+restart_dns_proxy() {
+	local container_name="$1"
+	local profile="$2"
+	local static_ip="${3:-}"
+	local profiles_dir="${4:-$PROJECT_ROOT/profiles}"
+
+	# Load profile configuration
+	if ! load_egress_profile "$profile" "$profiles_dir"; then
+		return 1
+	fi
+
+	# For profiles that don't need DNS proxy, just return success
+	if [[ "$EGRESS_NETWORK_MODE" == "none" ]] || [[ "$EGRESS_NETWORK_MODE" == "bridge" ]]; then
+		return 0
+	fi
+
+	# If no static IP provided, try to get current DNS proxy IP
+	if [[ -z "$static_ip" ]]; then
+		static_ip=$(get_dns_proxy_ip "$container_name")
+	fi
+
+	# Call start_dns_proxy with profile settings and static IP
+	# start_dns_proxy removes the old container before creating the new one
+	local new_ip
+	new_ip=$(start_dns_proxy \
+		"$container_name" \
+		"$EGRESS_ALLOWED_DOMAINS" \
+		"$EGRESS_BLOCKED_DOMAINS" \
+		"$EGRESS_DEFAULT_ACTION" \
+		"$static_ip")
+
+	if [[ -z "$new_ip" ]]; then
+		return 1
+	fi
+
+	# Verify IP was preserved (warn if not)
+	if [[ -n "$static_ip" ]] && [[ "$new_ip" != "$static_ip" ]]; then
+		if declare -f log_warning >/dev/null 2>&1; then
+			log_warning "DNS proxy IP changed from $static_ip to $new_ip"
+			log_warning "Container may need restart to use new DNS proxy"
+		fi
+	fi
+
+	echo "$new_ip"
+	return 0
 }
 
 # Cleanup network resources for a container

@@ -443,7 +443,8 @@ Control outbound network access from devbox containers with security profiles an
 ### Network Helper Library
 - [x] Create `lib/network.sh` with helper functions
 - [x] `create_container_network()` - create isolated Docker network
-- [x] `start_dns_proxy()` - start dnsmasq sidecar container
+- [x] `start_dns_proxy()` - start dnsmasq sidecar container (supports static IP for restarts)
+- [x] `restart_dns_proxy()` - restart DNS proxy with new profile, preserving IP for connectivity
 - [ ] `setup_iptables_rules()` - apply firewall rules via setup container (TODO: runtime enforcement)
 - [x] `cleanup_network_resources()` - remove network, DNS container, iptables rules
 
@@ -497,6 +498,10 @@ Control outbound network access from devbox containers with security profiles an
 - [x] Test strict profile DNS allowlist blocks non-whitelisted domains
 - [x] Test standard mode allows package manager domains (registry.npmjs.org resolves)
 - [x] Test `--allow-domain` adds custom domain access
+- [x] Test `devbox network reset` help and validation
+- [x] Test `devbox network reset --dry-run` shows what would be done
+- [x] Test `devbox network reset` recreates DNS proxy with profile defaults
+- [x] Test `restart_dns_proxy` preserves IP address for connectivity
 - [ ] Test DNS proxy logs queries (TODO: future enhancement)
 - [ ] Test iptables rules applied correctly (TODO: when iptables rules implemented)
 

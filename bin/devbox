@@ -3605,9 +3605,61 @@ EOF
 		fi
 	fi
 
-	# TODO: Remove custom labels and update profile
-	log_warning "Reset functionality not yet fully implemented"
-	log_info "Profile would be reset to: $target_profile"
+	# Get full container name for network operations
+	local full_container_name
+	full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" | sed 's|^/||')
+
+	# Handle profiles that don't use DNS proxy (airgapped/permissive)
+	if [[ "$target_profile" == "airgapped" ]] || [[ "$target_profile" == "permissive" ]]; then
+		# Just update labels - can't change network mode on running container
+		docker container update --label-add "devbox.egress=$target_profile" "$container_id" >/dev/null 2>&1 || true
+		docker container update --label-add "devbox.egress.reset=$(date +%s)" "$container_id" >/dev/null 2>&1 || true
+		log_success "Reset egress profile to: $target_profile"
+		if [[ "$target_profile" != "$current_profile" ]]; then
+			log_warning "Network mode change requires container restart to take full effect"
+		fi
+		return 0
+	fi
+
+	# For standard/strict profiles: recreate DNS proxy with profile defaults
+	local current_dns_ip
+	current_dns_ip=$(get_dns_proxy_ip "$full_container_name")
+
+	if [[ -z "$current_dns_ip" ]]; then
+		# No DNS proxy exists - container may be using permissive/airgapped profile
+		# Try to create a new DNS proxy if switching to standard/strict
+		if [[ "$current_profile" == "permissive" ]] || [[ "$current_profile" == "airgapped" ]]; then
+			log_error "Cannot reset to $target_profile: container was created without DNS proxy"
+			log_info "To use DNS filtering, recreate the container with --egress $target_profile"
+			return 1
+		fi
+		log_error "No DNS proxy found for container"
+		log_info "Container may be using permissive or airgapped profile"
+		return 1
+	fi
+
+	log_info "Recreating DNS proxy with $target_profile profile defaults..."
+
+	# Call restart_dns_proxy with the current IP to preserve connectivity
+	local new_dns_ip
+	if new_dns_ip=$(restart_dns_proxy "$full_container_name" "$target_profile" "$current_dns_ip"); then
+		# Update labels
+		docker container update --label-add "devbox.egress=$target_profile" "$container_id" >/dev/null 2>&1 || true
+		docker container update --label-add "devbox.egress.reset=$(date +%s)" "$container_id" >/dev/null 2>&1 || true
+
+		log_success "Reset egress rules to $target_profile profile defaults"
+
+		# Warn if IP changed (rare but possible)
+		if [[ -n "$new_dns_ip" ]] && [[ "$new_dns_ip" != "$current_dns_ip" ]]; then
+			log_warning "DNS proxy IP changed from $current_dns_ip to $new_dns_ip"
+			log_warning "Container may need restart: devbox stop $container_name && devbox start $container_name"
+		fi
+	else
+		log_error "Failed to restart DNS proxy"
+		log_info "DNS proxy may be in an inconsistent state"
+		log_info "Try: devbox stop $container_name && devbox start $container_name"
+		return 1
+	fi
 }
 
 cmd_secrets() {
