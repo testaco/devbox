@@ -526,6 +526,34 @@ Control outbound network access from devbox containers with security profiles an
 
 ---
 
+## Phase 7: Website Deployment
+
+Deploy the Vite + React marketing website to GitHub Pages.
+
+### Website Build (CI)
+- [x] Add `web-build` job to `.github/workflows/ci.yml`
+  - Install pnpm and Node.js 20
+  - Run TypeScript type checking
+  - Build project with Vite
+  - Verify output files exist
+
+### GitHub Pages Deployment
+- [x] Create `.github/workflows/deploy-pages.yml`
+  - Trigger on push to main (with path filter for `web/`)
+  - Support manual trigger via `workflow_dispatch`
+  - Use official GitHub Pages actions (configure-pages, upload-pages-artifact, deploy-pages)
+  - Set `VITE_BASE_PATH=/devbox/` for correct asset paths
+
+### Configuration Updates
+- [x] Update `web/vite.config.ts` with dynamic base path support
+- [x] Fix favicon reference in `web/index.html`
+
+### Post-Deployment Setup
+- [ ] Enable GitHub Pages in repository settings (Source: "GitHub Actions")
+- [ ] Verify deployment at https://testaco.github.io/devbox/
+
+---
+
 ## Known Risks / To Validate
 
 - [ ] **Nix in Docker**: Test Determinate installer actually works in container

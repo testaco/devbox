@@ -1,6 +1,7 @@
 # Devbox
 
 [![CI](https://github.com/testaco/devbox/workflows/CI/badge.svg)](https://github.com/testaco/devbox/actions/workflows/ci.yml)
+[![Website](https://github.com/testaco/devbox/actions/workflows/deploy-pages.yml/badge.svg)](https://testaco.github.io/devbox/)
 
 A CLI tool for managing isolated, authenticated development containers.
 
@@ -481,6 +482,20 @@ This project supports "developing devbox inside of devbox" - using devbox itself
 ## Architecture
 
 See [specs/spec.md](specs/spec.md) for detailed architecture and implementation notes.
+
+## Website
+
+The devbox marketing website is available at **https://testaco.github.io/devbox/**
+
+The website is built with Vite + React and automatically deployed to GitHub Pages when changes are pushed to the `web/` directory.
+
+### Local Development
+
+```bash
+cd web
+pnpm install
+pnpm dev
+```
 
 ## License
 

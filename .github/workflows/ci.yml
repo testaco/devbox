@@ -84,3 +84,51 @@ jobs:
       if: success()
       run: |
         echo "✅ All checks passed!"
+
+  web-build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'pnpm'
+        cache-dependency-path: web/pnpm-lock.yaml
+
+    - name: Install dependencies
+      working-directory: web
+      run: pnpm install --frozen-lockfile
+
+    - name: Type check
+      working-directory: web
+      run: pnpm exec tsc --noEmit
+
+    - name: Build
+      working-directory: web
+      env:
+        VITE_BASE_PATH: /devbox/
+      run: pnpm build
+
+    - name: Verify build output
+      working-directory: web
+      run: |
+        echo "Verifying build output..."
+        if [[ ! -f dist/index.html ]]; then
+          echo "❌ dist/index.html not found"
+          exit 1
+        fi
+        if [[ ! -d dist/assets ]]; then
+          echo "❌ dist/assets directory not found"
+          exit 1
+        fi
+        echo "✅ Build output verified"
+        ls -la dist/
