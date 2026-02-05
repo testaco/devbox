@@ -16,6 +16,11 @@ if [[ -f "$PROJECT_ROOT/lib/progress.sh" ]]; then
 	source "$PROJECT_ROOT/lib/progress.sh"
 fi
 
+# Source network egress control library
+if [[ -f "$PROJECT_ROOT/lib/network.sh" ]]; then
+	source "$PROJECT_ROOT/lib/network.sh"
+fi
+
 # Secrets directory (can be overridden via environment for testing)
 DEVBOX_SECRETS_DIR="${DEVBOX_SECRETS_DIR:-$HOME/.devbox/secrets}"
 
@@ -124,6 +129,7 @@ COMMANDS:
     exec <name|id> <cmd>    Execute a command in a running container
     ports <name|id>         Show port mappings for a container
     secrets <subcommand>    Manage secrets (add, remove, list, path)
+    network <subcommand>    Manage network egress rules (show, allow, block, logs)
     help                    Show this help message
 
 INIT OPTIONS:
@@ -138,6 +144,13 @@ CREATE OPTIONS:
     --aws-profile <profile>      AWS profile name
     --enable-docker              Enable Docker-in-Docker functionality
     --sudo <mode>                Enable sudo: nopass (passwordless) or password
+    --egress <profile>           Network egress profile: permissive, standard (default),
+                                 strict, or airgapped
+    --allow-domain <domain>      Additional allowed domain (repeatable)
+    --block-domain <domain>      Block specific domain (repeatable)
+    --allow-ip <ip/cidr>         Additional allowed IP/CIDR (repeatable)
+    --block-ip <ip/cidr>         Block specific IP/CIDR (repeatable)
+    --allow-port <port>          Additional allowed port (repeatable)
 
 RM OPTIONS:
     --force                Force remove a running container
@@ -432,6 +445,12 @@ cmd_create() {
 	local enable_docker=false
 	local sudo_mode=""
 	local sudo_password_hash=""
+	local egress_profile=""
+	local allow_domains=()
+	local block_domains=()
+	local allow_ips=()
+	local block_ips=()
+	local allow_ports=()
 
 	# Parse arguments and flags
 	while [[ $# -gt 0 ]]; do
@@ -492,6 +511,59 @@ cmd_create() {
 			sudo_mode="$2"
 			shift 2
 			;;
+		--egress)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a profile name"
+				return 1
+			fi
+			if ! validate_egress_profile "$2"; then
+				log_error "Invalid egress profile: $2"
+				log_error "Valid profiles: $VALID_EGRESS_PROFILES"
+				return 1
+			fi
+			egress_profile="$2"
+			shift 2
+			;;
+		--allow-domain)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a domain"
+				return 1
+			fi
+			allow_domains+=("$2")
+			shift 2
+			;;
+		--block-domain)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a domain"
+				return 1
+			fi
+			block_domains+=("$2")
+			shift 2
+			;;
+		--allow-ip)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires an IP/CIDR"
+				return 1
+			fi
+			allow_ips+=("$2")
+			shift 2
+			;;
+		--block-ip)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires an IP/CIDR"
+				return 1
+			fi
+			block_ips+=("$2")
+			shift 2
+			;;
+		--allow-port)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a port number"
+				return 1
+			fi
+			allow_ports+=("$2")
+			shift 2
+			;;
 		--help | -h)
 			cat <<EOF
 devbox create - Create and start a new container instance
@@ -511,6 +583,13 @@ OPTIONS:
     --aws-profile <profile>      AWS profile name
     --enable-docker              Enable Docker-in-Docker functionality
     --sudo <mode>                Enable sudo: nopass (passwordless) or password
+    --egress <profile>           Network egress profile: permissive, standard (default),
+                                 strict, or airgapped
+    --allow-domain <domain>      Additional allowed domain (repeatable)
+    --block-domain <domain>      Block specific domain (repeatable)
+    --allow-ip <ip/cidr>         Additional allowed IP/CIDR (repeatable)
+    --block-ip <ip/cidr>         Block specific IP/CIDR (repeatable)
+    --allow-port <port>          Additional allowed port (repeatable)
     --help, -h                   Show this help message
 
 DESCRIPTION:
@@ -797,16 +876,64 @@ EOF
 		)
 	fi
 
+	# Set default egress profile if not specified
+	if [[ -z "$egress_profile" ]]; then
+		egress_profile="$DEFAULT_EGRESS_PROFILE"
+	fi
+
+	# Load egress profile configuration
+	if ! load_egress_profile "$egress_profile"; then
+		log_error "Failed to load egress profile: $egress_profile"
+		return 1
+	fi
+
+	# Merge additional rules from command line
+	if [[ ${#allow_domains[@]} -gt 0 ]]; then
+		merge_egress_rules "allow_domain" "${allow_domains[@]}"
+	fi
+	if [[ ${#block_domains[@]} -gt 0 ]]; then
+		merge_egress_rules "block_domain" "${block_domains[@]}"
+	fi
+	if [[ ${#allow_ips[@]} -gt 0 ]]; then
+		merge_egress_rules "allow_ip" "${allow_ips[@]}"
+	fi
+	if [[ ${#block_ips[@]} -gt 0 ]]; then
+		merge_egress_rules "block_ip" "${block_ips[@]}"
+	fi
+	if [[ ${#allow_ports[@]} -gt 0 ]]; then
+		merge_egress_rules "allow_port" "${allow_ports[@]}"
+	fi
+
 	# Prepare container labels for metadata
 	local labels=""
 	labels="$labels --label devbox.repo=$repo_url"
 	labels="$labels --label devbox.mode=$auth_mode"
+	labels="$labels --label devbox.egress=$egress_profile"
 	if [[ -n "$port_labels" ]]; then
 		labels="$labels --label devbox.ports=$port_labels"
 	fi
 
 	# Build Docker run command
 	local docker_cmd="docker run -dit"
+
+	# Network configuration for egress control
+	local network_name=""
+	local dns_container=""
+	local dns_proxy_ip=""
+	local use_custom_network=false
+
+	# Apply network mode from egress profile
+	# airgapped profile sets EGRESS_NETWORK_MODE="none" which means --network none
+	if [[ "$EGRESS_NETWORK_MODE" == "none" ]]; then
+		docker_cmd="$docker_cmd --network none"
+	elif [[ "$EGRESS_NETWORK_MODE" == "custom" ]]; then
+		# Standard/strict profiles use custom network with DNS proxy
+		use_custom_network=true
+		network_name="${full_container_name}-net"
+		dns_container="${full_container_name}-dns"
+	fi
+	# permissive mode (bridge) uses default Docker networking
+
 	docker_cmd="$docker_cmd --name $full_container_name"
 	docker_cmd="$docker_cmd -v ${DEVBOX_VOLUME}:/devbox-credentials:ro"
 	docker_cmd="$docker_cmd -v ${full_container_name}-workspace:/workspace"
@@ -879,6 +1006,29 @@ EOF
 		else
 			echo "  Sudo: disabled"
 		fi
+		echo "  Egress profile: $egress_profile"
+		if [[ -n "$EGRESS_NETWORK_MODE" ]]; then
+			echo "  Network mode: $EGRESS_NETWORK_MODE"
+		fi
+		if [[ "$use_custom_network" == true ]]; then
+			echo "  Custom network: $network_name"
+			echo "  DNS proxy: $dns_container (filters blocked domains)"
+		fi
+		if [[ ${#allow_domains[@]} -gt 0 ]]; then
+			echo "  Additional allowed domains: ${allow_domains[*]}"
+		fi
+		if [[ ${#block_domains[@]} -gt 0 ]]; then
+			echo "  Additional blocked domains: ${block_domains[*]}"
+		fi
+		if [[ ${#allow_ips[@]} -gt 0 ]]; then
+			echo "  Additional allowed IPs: ${allow_ips[*]}"
+		fi
+		if [[ ${#block_ips[@]} -gt 0 ]]; then
+			echo "  Additional blocked IPs: ${block_ips[*]}"
+		fi
+		if [[ ${#allow_ports[@]} -gt 0 ]]; then
+			echo "  Additional allowed ports: ${allow_ports[*]}"
+		fi
 		# Show docker command (secrets paths are fine to show, values are in files)
 		echo "  Docker command: $docker_cmd"
 		return 0
@@ -892,6 +1042,46 @@ EOF
 		log_error "Credentials volume '$DEVBOX_VOLUME' does not exist"
 		log_error "Run 'devbox init' first to set up credentials"
 		return 1
+	fi
+
+	# Set up custom network with DNS proxy for standard/strict egress profiles
+	if [[ "$use_custom_network" == true ]]; then
+		if declare -f with_spinner >/dev/null 2>&1; then
+			start_spinner "Setting up egress network and DNS proxy"
+		else
+			log_info "Setting up egress network with DNS filtering..."
+		fi
+
+		# Create isolated network
+		if ! network_name=$(create_container_network "$full_container_name"); then
+			if declare -f stop_spinner >/dev/null 2>&1; then
+				stop_spinner 1
+			fi
+			log_error "Failed to create egress network"
+			return 1
+		fi
+
+		# Start DNS proxy with domain filtering
+		# Pass default_action to determine allowlist (drop) vs blocklist (accept) mode
+		dns_proxy_ip=$(start_dns_proxy "$full_container_name" "$EGRESS_ALLOWED_DOMAINS" "$EGRESS_BLOCKED_DOMAINS" "$EGRESS_DEFAULT_ACTION")
+		if [[ -z "$dns_proxy_ip" ]]; then
+			if declare -f stop_spinner >/dev/null 2>&1; then
+				stop_spinner 1
+			fi
+			log_error "Failed to start DNS proxy"
+			# Cleanup network
+			docker network rm "$network_name" >/dev/null 2>&1 || true
+			return 1
+		fi
+
+		if declare -f stop_spinner >/dev/null 2>&1; then
+			stop_spinner 0
+		fi
+
+		log_info "DNS proxy started on network $network_name"
+
+		# Add network and DNS configuration to docker command
+		docker_cmd="$docker_cmd --network $network_name --dns $dns_proxy_ip"
 	fi
 
 	# Fix workspace volume permissions (similar to credentials volume fix in cmd_init)
@@ -1053,8 +1243,8 @@ EOF
 	fi
 
 	# Print table header
-	printf "%-12s %-10s %-10s %-35s %-15s %s\n" "NAME" "ID" "STATUS" "REPO" "PORTS" "MODE"
-	printf "%-12s %-10s %-10s %-35s %-15s %s\n" "----" "--" "------" "----" "-----" "----"
+	printf "%-12s %-10s %-10s %-30s %-12s %-10s %s\n" "NAME" "ID" "STATUS" "REPO" "PORTS" "MODE" "EGRESS"
+	printf "%-12s %-10s %-10s %-30s %-12s %-10s %s\n" "----" "--" "------" "----" "-----" "----" "------"
 
 	# Process each container
 	while IFS=$'\t' read -r container_id container_name status; do
@@ -1077,10 +1267,11 @@ EOF
 		fi
 
 		# Get container labels
-		local repo mode ports
+		local repo mode ports egress
 		repo=$(docker inspect --format '{{index .Config.Labels "devbox.repo"}}' "$container_id" 2>/dev/null || echo "unknown")
 		mode=$(docker inspect --format '{{index .Config.Labels "devbox.mode"}}' "$container_id" 2>/dev/null || echo "oauth")
 		ports=$(docker inspect --format '{{index .Config.Labels "devbox.ports"}}' "$container_id" 2>/dev/null || echo "")
+		egress=$(docker inspect --format '{{index .Config.Labels "devbox.egress"}}' "$container_id" 2>/dev/null || echo "")
 
 		# Handle empty ports
 		if [[ -z "$ports" ]] || [[ "$ports" == "<no value>" ]]; then
@@ -1094,10 +1285,13 @@ EOF
 		if [[ "$mode" == "<no value>" ]]; then
 			mode="oauth"
 		fi
+		if [[ -z "$egress" ]] || [[ "$egress" == "<no value>" ]]; then
+			egress="permissive"
+		fi
 
 		# Print container row
-		printf "%-12s %-10s %-10s %-35s %-15s %s\n" \
-			"$display_name" "$short_id" "$simple_status" "$repo" "$ports" "$mode"
+		printf "%-12s %-10s %-10s %-30s %-12s %-10s %s\n" \
+			"$display_name" "$short_id" "$simple_status" "$repo" "$ports" "$mode" "$egress"
 
 	done <<<"$containers"
 }
@@ -1442,6 +1636,45 @@ EOF
 		log_error "Failed to start container '$display_name'"
 		return 1
 	fi
+
+	# Re-apply egress rules if container uses DNS proxy
+	# Get the full container name for network resource lookup
+	local full_container_name
+	full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///')
+	local dns_container="${full_container_name}-dns"
+
+	# Check if DNS proxy exists for this container
+	if docker inspect "$dns_container" >/dev/null 2>&1; then
+		# Get the egress profile from container labels
+		local egress_profile
+		egress_profile=$(docker inspect --format '{{index .Config.Labels "devbox.egress"}}' "$container_id" 2>/dev/null || echo "")
+
+		if [[ -n "$egress_profile" ]] && [[ "$egress_profile" != "permissive" ]] && [[ "$egress_profile" != "airgapped" ]]; then
+			# Check if there are custom rules in labels
+			local has_custom_rules=false
+			local labels
+			labels=$(docker inspect --format '{{range $k, $v := .Config.Labels}}{{$k}}{{"\n"}}{{end}}' "$container_id" 2>/dev/null || echo "")
+			if echo "$labels" | grep -q "devbox.egress.allow\|devbox.egress.block"; then
+				has_custom_rules=true
+			fi
+
+			if [[ "$has_custom_rules" == "true" ]]; then
+				log_info "Re-applying custom egress rules..."
+
+				# Get current DNS proxy IP
+				local current_dns_ip
+				current_dns_ip=$(get_dns_proxy_ip "$full_container_name")
+
+				# Restart DNS proxy with custom rules applied
+				if restart_dns_proxy "$full_container_name" "$egress_profile" "$current_dns_ip" "$PROJECT_ROOT/profiles" "true" >/dev/null 2>&1; then
+					log_success "Custom egress rules re-applied"
+				else
+					log_warning "Failed to re-apply custom egress rules"
+					log_info "DNS proxy may need manual restart"
+				fi
+			fi
+		fi
+	fi
 }
 
 cmd_rm() {
@@ -1645,6 +1878,12 @@ EOF
 				if docker volume rm "$sudoers_volume" >/dev/null 2>&1; then
 					log_info "Sudoers volume removed for '$display_name'"
 				fi
+
+				# Cleanup network resources (DNS proxy container and custom network)
+				cleanup_network_resources "$full_container_name"
+
+				# Cleanup egress rule files
+				cleanup_egress_rules "$full_container_name"
 			else
 				log_error "Failed to remove container '$display_name'"
 				((failed_count++)) || true
@@ -1763,6 +2002,12 @@ EOF
 				if docker volume rm "$sudoers_volume" >/dev/null 2>&1; then
 					log_info "Sudoers volume removed"
 				fi
+
+				# Cleanup network resources (DNS proxy container and custom network)
+				cleanup_network_resources "$full_container_name"
+
+				# Cleanup egress rule files
+				cleanup_egress_rules "$full_container_name"
 			fi
 		else
 			log_error "Failed to remove container '$display_name'"
@@ -2744,6 +2989,726 @@ EOF
 	echo "$DEVBOX_SECRETS_DIR"
 }
 
+# ============================================================================
+# Network Egress Commands
+# ============================================================================
+
+cmd_network() {
+	# Parse subcommand
+	if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+		cat <<EOF
+devbox network - Manage network egress rules for containers
+
+USAGE:
+    devbox network <subcommand> [options]
+
+SUBCOMMANDS:
+    show <container>       Display current egress rules for a container
+    allow <container>      Add an allow rule to a container
+    block <container>      Add a block rule to a container
+    logs <container>       View egress logs for a container
+    reset <container>      Reset egress rules to profile defaults
+
+OPTIONS:
+    --help, -h            Show this help message
+
+DESCRIPTION:
+    Manages network egress (outbound) rules for devbox containers.
+    Each container has an egress profile (permissive, standard, strict, airgapped)
+    that controls what external network access is allowed.
+
+EXAMPLES:
+    # Show current egress rules
+    devbox network show myapp
+
+    # Allow additional domain
+    devbox network allow myapp --domain api.example.com
+
+    # Block a domain
+    devbox network block myapp --domain evil.com
+
+    # View egress logs (blocked attempts)
+    devbox network logs myapp --blocked-only
+
+EOF
+		return 0
+	fi
+
+	local subcommand="$1"
+	shift
+
+	case "$subcommand" in
+	show)
+		cmd_network_show "$@"
+		;;
+	allow)
+		cmd_network_allow "$@"
+		;;
+	block)
+		cmd_network_block "$@"
+		;;
+	logs)
+		cmd_network_logs "$@"
+		;;
+	reset)
+		cmd_network_reset "$@"
+		;;
+	*)
+		log_error "Unknown network subcommand: $subcommand"
+		echo "Run 'devbox network --help' for usage"
+		return 1
+		;;
+	esac
+}
+
+cmd_network_show() {
+	local container_name=""
+	local dry_run=false
+
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--help | -h)
+			cat <<EOF
+devbox network show - Display current egress rules for a container
+
+USAGE:
+    devbox network show <container>
+
+ARGUMENTS:
+    <container>           Container name or ID
+
+OPTIONS:
+    --help, -h           Show this help message
+
+DESCRIPTION:
+    Shows the current network egress configuration for a container,
+    including its profile, allowed/blocked domains, IPs, and ports.
+
+EXAMPLES:
+    devbox network show myapp
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			if [[ -z "$container_name" ]]; then
+				container_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				return 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	# Validate required arguments
+	if [[ -z "$container_name" ]]; then
+		log_error "Container name required"
+		log_error "Usage: devbox network show <container>"
+		return 1
+	fi
+
+	# Resolve container
+	local container_id
+	if ! container_id=$(resolve_container "$container_name"); then
+		log_error "Container not found: $container_name"
+		return 1
+	fi
+
+	# Get egress profile from label
+	local egress_profile
+	egress_profile=$(docker inspect --format '{{index .Config.Labels "devbox.egress"}}' "$container_id" 2>/dev/null || echo "permissive")
+	if [[ -z "$egress_profile" ]] || [[ "$egress_profile" == "<no value>" ]]; then
+		egress_profile="permissive"
+	fi
+
+	# Display name
+	local display_name
+	display_name=$(docker inspect --format '{{.Name}}' "$container_id" | sed 's|^/||')
+	display_name="${display_name#devbox-}"
+	display_name="${display_name#test-}"
+
+	echo "Network Egress Configuration"
+	echo "============================="
+	echo "Container: $display_name"
+	echo "Profile: $egress_profile"
+	echo ""
+
+	# Load and display profile details
+	if load_egress_profile "$egress_profile"; then
+		echo "Network mode: $EGRESS_NETWORK_MODE"
+		echo "Default action: $EGRESS_DEFAULT_ACTION"
+		echo ""
+
+		if [[ -n "$EGRESS_ALLOWED_PORTS" ]]; then
+			echo "Allowed ports:"
+			for port in $EGRESS_ALLOWED_PORTS; do
+				[[ -z "$port" ]] && continue
+				echo "  - $port"
+			done
+			echo ""
+		fi
+
+		# Count domains (don't list them all for standard profile)
+		local domain_count
+		domain_count=$(echo "$EGRESS_ALLOWED_DOMAINS" | grep -v '^#' | grep -v '^$' | wc -w)
+		if [[ "$domain_count" -gt 0 ]]; then
+			echo "Allowed domains: $domain_count patterns"
+			echo "  (use 'devbox network show $container_name --verbose' for full list)"
+			echo ""
+		fi
+
+		local blocked_count
+		blocked_count=$(echo "$EGRESS_BLOCKED_DOMAINS" | grep -v '^#' | grep -v '^$' | wc -w)
+		if [[ "$blocked_count" -gt 0 ]]; then
+			echo "Blocked domains: $blocked_count patterns"
+			echo ""
+		fi
+	else
+		echo "Profile details not available"
+	fi
+}
+
+cmd_network_allow() {
+	local container_name=""
+	local domain=""
+	local ip=""
+	local port=""
+	local dry_run=false
+
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--domain)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a domain"
+				return 1
+			fi
+			domain="$2"
+			shift 2
+			;;
+		--ip)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires an IP/CIDR"
+				return 1
+			fi
+			ip="$2"
+			shift 2
+			;;
+		--port)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a port"
+				return 1
+			fi
+			port="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--help | -h)
+			cat <<EOF
+devbox network allow - Add an allow rule to a container
+
+USAGE:
+    devbox network allow <container> [options]
+
+ARGUMENTS:
+    <container>           Container name or ID
+
+OPTIONS:
+    --domain <domain>    Allow a domain
+    --ip <ip/cidr>       Allow an IP or CIDR range
+    --port <port>        Allow a port
+    --dry-run            Show what would be done without making changes
+    --help, -h           Show this help message
+
+EXAMPLES:
+    devbox network allow myapp --domain api.example.com
+    devbox network allow myapp --ip 10.0.0.0/8
+    devbox network allow myapp --port 8443
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			if [[ -z "$container_name" ]]; then
+				container_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				return 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	# Validate required arguments
+	if [[ -z "$container_name" ]]; then
+		log_error "Container name required"
+		return 1
+	fi
+
+	if [[ -z "$domain" ]] && [[ -z "$ip" ]] && [[ -z "$port" ]]; then
+		log_error "Must specify --domain, --ip, or --port"
+		return 1
+	fi
+
+	# Resolve container
+	local container_id
+	if ! container_id=$(resolve_container "$container_name"); then
+		log_error "Container not found: $container_name"
+		return 1
+	fi
+
+	if [[ "$dry_run" == true ]]; then
+		echo "Would add allow rule to container '$container_name':"
+		[[ -n "$domain" ]] && echo "  Domain: $domain"
+		[[ -n "$ip" ]] && echo "  IP: $ip"
+		[[ -n "$port" ]] && echo "  Port: $port"
+		return 0
+	fi
+
+	# Get full container name for file storage
+	local full_container_name
+	full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///')
+
+	# Store rules in files using library function
+	if [[ -n "$domain" ]]; then
+		store_egress_rule "$full_container_name" "allow-domain" "$domain"
+		log_success "Added allow rule for domain: $domain"
+	fi
+	if [[ -n "$ip" ]]; then
+		store_egress_rule "$full_container_name" "allow-ip" "$ip"
+		log_success "Added allow rule for IP: $ip"
+	fi
+	if [[ -n "$port" ]]; then
+		store_egress_rule "$full_container_name" "allow-port" "$port"
+		log_success "Added allow rule for port: $port"
+	fi
+
+	log_info "Rule stored. It will be applied on next container restart (stop then start)"
+	log_info "For immediate effect, run: devbox stop $container_name && devbox start $container_name"
+}
+
+cmd_network_block() {
+	local container_name=""
+	local domain=""
+	local ip=""
+	local dry_run=false
+
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--domain)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a domain"
+				return 1
+			fi
+			domain="$2"
+			shift 2
+			;;
+		--ip)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires an IP/CIDR"
+				return 1
+			fi
+			ip="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--help | -h)
+			cat <<EOF
+devbox network block - Add a block rule to a container
+
+USAGE:
+    devbox network block <container> [options]
+
+ARGUMENTS:
+    <container>           Container name or ID
+
+OPTIONS:
+    --domain <domain>    Block a domain
+    --ip <ip/cidr>       Block an IP or CIDR range
+    --dry-run            Show what would be done without making changes
+    --help, -h           Show this help message
+
+EXAMPLES:
+    devbox network block myapp --domain evil.com
+    devbox network block myapp --ip 192.168.1.100
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			if [[ -z "$container_name" ]]; then
+				container_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				return 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	# Validate required arguments
+	if [[ -z "$container_name" ]]; then
+		log_error "Container name required"
+		return 1
+	fi
+
+	if [[ -z "$domain" ]] && [[ -z "$ip" ]]; then
+		log_error "Must specify --domain or --ip"
+		return 1
+	fi
+
+	# Resolve container
+	local container_id
+	if ! container_id=$(resolve_container "$container_name"); then
+		log_error "Container not found: $container_name"
+		return 1
+	fi
+
+	if [[ "$dry_run" == true ]]; then
+		echo "Would add block rule to container '$container_name':"
+		[[ -n "$domain" ]] && echo "  Domain: $domain"
+		[[ -n "$ip" ]] && echo "  IP: $ip"
+		return 0
+	fi
+
+	# Get full container name for file storage
+	local full_container_name
+	full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null | sed 's/^\///')
+
+	# Store rules in files using library function
+	if [[ -n "$domain" ]]; then
+		store_egress_rule "$full_container_name" "block-domain" "$domain"
+		log_success "Added block rule for domain: $domain"
+	fi
+	if [[ -n "$ip" ]]; then
+		store_egress_rule "$full_container_name" "block-ip" "$ip"
+		log_success "Added block rule for IP: $ip"
+	fi
+
+	log_info "Rule stored. It will be applied on next container restart (stop then start)"
+	log_info "For immediate effect, run: devbox stop $container_name && devbox start $container_name"
+}
+
+cmd_network_logs() {
+	local container_name=""
+	local blocked_only=false
+	local follow=false
+	local tail_lines=""
+	local dry_run=false
+
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--blocked-only)
+			blocked_only=true
+			shift
+			;;
+		--follow | -f)
+			follow=true
+			shift
+			;;
+		--tail)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a number"
+				return 1
+			fi
+			tail_lines="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--help | -h)
+			cat <<EOF
+devbox network logs - View egress logs for a container
+
+USAGE:
+    devbox network logs <container> [options]
+
+ARGUMENTS:
+    <container>           Container name or ID
+
+OPTIONS:
+    --blocked-only       Show only blocked connection attempts
+    -f, --follow         Follow log output
+    --tail <n>           Number of lines to show
+    --dry-run            Show what would be done
+    --help, -h           Show this help message
+
+DESCRIPTION:
+    Shows network egress logs for a container. When DNS filtering is enabled,
+    logs include DNS queries. When IP filtering is enabled, logs include
+    blocked connection attempts.
+
+EXAMPLES:
+    devbox network logs myapp
+    devbox network logs myapp --blocked-only
+    devbox network logs myapp -f --tail 50
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			if [[ -z "$container_name" ]]; then
+				container_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				return 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	# Validate required arguments
+	if [[ -z "$container_name" ]]; then
+		log_error "Container name required"
+		log_error "Usage: devbox network logs <container>"
+		return 1
+	fi
+
+	# Resolve container
+	local container_id
+	if ! container_id=$(resolve_container "$container_name"); then
+		log_error "Container not found: $container_name"
+		return 1
+	fi
+
+	if [[ "$dry_run" == true ]]; then
+		echo "Would show egress logs for container '$container_name'"
+		[[ "$blocked_only" == true ]] && echo "  Filter: blocked only"
+		[[ "$follow" == true ]] && echo "  Mode: follow"
+		[[ -n "$tail_lines" ]] && echo "  Lines: $tail_lines"
+		return 0
+	fi
+
+	# Get container name for DNS proxy lookup
+	local full_name
+	full_name=$(docker inspect --format '{{.Name}}' "$container_id" | sed 's|^/||')
+	local dns_container="${full_name}-dns"
+
+	# Check if DNS proxy container exists
+	if docker ps -q --filter "name=^${dns_container}$" 2>/dev/null | grep -q .; then
+		log_info "DNS proxy logs for $container_name:"
+		local docker_logs_cmd="docker logs"
+		[[ "$follow" == true ]] && docker_logs_cmd="$docker_logs_cmd -f"
+		[[ -n "$tail_lines" ]] && docker_logs_cmd="$docker_logs_cmd --tail $tail_lines"
+		docker_logs_cmd="$docker_logs_cmd $dns_container"
+
+		if [[ "$blocked_only" == true ]]; then
+			eval "$docker_logs_cmd" 2>&1 | grep -i "blocked\|denied\|refused" || true
+		else
+			eval "$docker_logs_cmd" 2>&1
+		fi
+	else
+		log_info "No DNS proxy running for this container"
+		log_info "Egress logging is only available for containers with egress filtering enabled"
+		log_info "(profiles: standard, strict)"
+	fi
+}
+
+cmd_network_reset() {
+	local container_name=""
+	local profile=""
+	local dry_run=false
+	local force=false
+
+	# Parse arguments and flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--profile)
+			if [[ -z "${2:-}" ]]; then
+				log_error "Option $1 requires a profile name"
+				return 1
+			fi
+			profile="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=true
+			shift
+			;;
+		--force | -f)
+			force=true
+			shift
+			;;
+		--help | -h)
+			cat <<EOF
+devbox network reset - Reset egress rules to profile defaults
+
+USAGE:
+    devbox network reset <container> [options]
+
+ARGUMENTS:
+    <container>           Container name or ID
+
+OPTIONS:
+    --profile <profile>  Reset to a different profile (default: current profile)
+    --force, -f          Skip confirmation
+    --dry-run            Show what would be done
+    --help, -h           Show this help message
+
+DESCRIPTION:
+    Removes all custom egress rules (added via 'devbox network allow/block')
+    and resets the container to its profile defaults. Optionally switch to
+    a different profile.
+
+EXAMPLES:
+    devbox network reset myapp
+    devbox network reset myapp --profile strict
+    devbox network reset myapp --force
+
+EOF
+			return 0
+			;;
+		--*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		*)
+			if [[ -z "$container_name" ]]; then
+				container_name="$1"
+			else
+				log_error "Unexpected argument: $1"
+				return 1
+			fi
+			shift
+			;;
+		esac
+	done
+
+	# Validate required arguments
+	if [[ -z "$container_name" ]]; then
+		log_error "Container name required"
+		return 1
+	fi
+
+	# Resolve container
+	local container_id
+	if ! container_id=$(resolve_container "$container_name"); then
+		log_error "Container not found: $container_name"
+		return 1
+	fi
+
+	# Get current profile
+	local current_profile
+	current_profile=$(docker inspect --format '{{index .Config.Labels "devbox.egress"}}' "$container_id" 2>/dev/null || echo "permissive")
+	if [[ -z "$current_profile" ]] || [[ "$current_profile" == "<no value>" ]]; then
+		current_profile="permissive"
+	fi
+
+	# Use new profile if specified
+	local target_profile="${profile:-$current_profile}"
+
+	if [[ "$dry_run" == true ]]; then
+		echo "Would reset egress rules for container '$container_name'"
+		echo "  Current profile: $current_profile"
+		echo "  Target profile: $target_profile"
+		return 0
+	fi
+
+	# Confirm if not forced
+	if [[ "$force" != true ]]; then
+		echo "This will remove all custom egress rules for '$container_name'"
+		echo "and reset to profile: $target_profile"
+		echo -n "Continue? [y/N] "
+		read -r response
+		if [[ "$response" != "y" ]] && [[ "$response" != "Y" ]]; then
+			log_info "Cancelled"
+			return 0
+		fi
+	fi
+
+	# Get full container name for network operations
+	local full_container_name
+	full_container_name=$(docker inspect --format '{{.Name}}' "$container_id" | sed 's|^/||')
+
+	# Handle profiles that don't use DNS proxy (airgapped/permissive)
+	if [[ "$target_profile" == "airgapped" ]] || [[ "$target_profile" == "permissive" ]]; then
+		# Just update labels - can't change network mode on running container
+		docker container update --label-add "devbox.egress=$target_profile" "$container_id" >/dev/null 2>&1 || true
+		docker container update --label-add "devbox.egress.reset=$(date +%s)" "$container_id" >/dev/null 2>&1 || true
+		log_success "Reset egress profile to: $target_profile"
+		if [[ "$target_profile" != "$current_profile" ]]; then
+			log_warning "Network mode change requires container restart to take full effect"
+		fi
+		return 0
+	fi
+
+	# For standard/strict profiles: recreate DNS proxy with profile defaults
+	local current_dns_ip
+	current_dns_ip=$(get_dns_proxy_ip "$full_container_name")
+
+	if [[ -z "$current_dns_ip" ]]; then
+		# No DNS proxy exists - container may be using permissive/airgapped profile
+		# Try to create a new DNS proxy if switching to standard/strict
+		if [[ "$current_profile" == "permissive" ]] || [[ "$current_profile" == "airgapped" ]]; then
+			log_error "Cannot reset to $target_profile: container was created without DNS proxy"
+			log_info "To use DNS filtering, recreate the container with --egress $target_profile"
+			return 1
+		fi
+		log_error "No DNS proxy found for container"
+		log_info "Container may be using permissive or airgapped profile"
+		return 1
+	fi
+
+	log_info "Recreating DNS proxy with $target_profile profile defaults..."
+
+	# Call restart_dns_proxy with the current IP to preserve connectivity
+	local new_dns_ip
+	if new_dns_ip=$(restart_dns_proxy "$full_container_name" "$target_profile" "$current_dns_ip"); then
+		# Update labels
+		docker container update --label-add "devbox.egress=$target_profile" "$container_id" >/dev/null 2>&1 || true
+		docker container update --label-add "devbox.egress.reset=$(date +%s)" "$container_id" >/dev/null 2>&1 || true
+
+		log_success "Reset egress rules to $target_profile profile defaults"
+
+		# Warn if IP changed (rare but possible)
+		if [[ -n "$new_dns_ip" ]] && [[ "$new_dns_ip" != "$current_dns_ip" ]]; then
+			log_warning "DNS proxy IP changed from $current_dns_ip to $new_dns_ip"
+			log_warning "Container may need restart: devbox stop $container_name && devbox start $container_name"
+		fi
+	else
+		log_error "Failed to restart DNS proxy"
+		log_info "DNS proxy may be in an inconsistent state"
+		log_info "Try: devbox stop $container_name && devbox start $container_name"
+		return 1
+	fi
+}
+
 cmd_secrets() {
 	# Parse arguments and flags
 	if [[ $# -eq 0 ]]; then
@@ -2887,6 +3852,10 @@ main() {
 	ports)
 		shift
 		cmd_ports "$@"
+		;;
+	network)
+		shift
+		cmd_network "$@"
 		;;
 	*)
 		log_error "Unknown command: $1"

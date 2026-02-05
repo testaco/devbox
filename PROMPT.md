@@ -7,3 +7,7 @@ IMPORTANT:
 - when you complete the task, update the plan.md file and then commit
 - always then make sure that all changes were committed, then push
 - always make sure CI on guthub.passes after pushing
+
+---
+
+continue on phase 6 network egress

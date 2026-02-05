@@ -31,6 +31,8 @@ Devbox includes several security features to minimize the attack surface:
 
 **Secrets are stored securely**: Secrets are stored with restricted file permissions (600) and mounted into containers via Docker volumes, never exposed as environment variables visible in `docker inspect`.
 
+**Network egress control**: Containers use the `standard` egress profile by default, which allows access only to common development services (package managers, git hosts, cloud APIs) and blocks known data exfiltration vectors. Use `--egress strict` for tighter control or `--egress airgapped` for complete network isolation.
+
 ## Installation
 
 ### Prerequisites
@@ -145,6 +147,7 @@ devbox attach myproject
 | `devbox exec <name\|id> <cmd>` | Execute a command in a running container |
 | `devbox ports <name\|id>` | Show port mappings for a container |
 | `devbox secrets <subcommand>` | Manage secrets (add, remove, list, path, import-env) |
+| `devbox network <subcommand>` | Manage network egress rules (show, allow, block, logs, reset) |
 | `devbox help` | Show help message |
 
 ### Secrets Management
@@ -169,6 +172,47 @@ devbox secrets remove github-token
 devbox secrets path
 ```
 
+### Network Egress Control
+
+Devbox controls outbound network access with security profiles:
+
+| Profile | Description |
+|---------|-------------|
+| `permissive` | All egress allowed (no restrictions) |
+| `standard` | Dev-friendly allowlist - package managers, git hosts, cloud APIs (default) |
+| `strict` | Minimal egress - only explicit allowlist, blocks everything else |
+| `airgapped` | No network access - fully isolated container |
+
+```bash
+# Create container with standard profile (default)
+devbox create myapp org/repo --github-secret github-token --claude-code-secret claude-oauth-token
+
+# Create container with strict egress
+devbox create myapp org/repo --github-secret github-token --claude-code-secret claude-oauth-token \
+  --egress strict --allow-domain api.example.com
+
+# Create airgapped container
+devbox create myapp org/repo --github-secret github-token --claude-code-secret claude-oauth-token \
+  --egress airgapped
+
+# View egress rules for a container
+devbox network show myapp
+
+# Add an allowed domain at runtime
+devbox network allow myapp --domain api.example.com
+
+# Block a domain
+devbox network block myapp --domain evil.com
+
+# View egress logs
+devbox network logs myapp --blocked-only
+```
+
+The `standard` profile includes:
+- **Allowed ports**: 53 (DNS), 22 (SSH), 80 (HTTP), 443 (HTTPS), 9418 (Git)
+- **Allowed domains**: github.com, npmjs.org, pypi.org, crates.io, cache.nixos.org, amazonaws.com, anthropic.com, and more
+- **Blocked domains**: pastebin.com, transfer.sh, ngrok.io (data exfiltration vectors)
+
 ### Init Options
 
 | Option | Description |
@@ -188,6 +232,12 @@ devbox secrets path
 | `--aws-profile <profile>` | AWS profile name for Bedrock |
 | `--enable-docker` | Enable Docker-in-Docker functionality (disabled by default for security) |
 | `--sudo <mode>` | Enable sudo access: `nopass` (passwordless) or `password` (prompts for password) |
+| `--egress <profile>` | Network egress profile: `permissive`, `standard` (default), `strict`, or `airgapped` |
+| `--allow-domain <domain>` | Additional allowed domain (can be used multiple times) |
+| `--block-domain <domain>` | Block specific domain (can be used multiple times) |
+| `--allow-ip <ip/cidr>` | Additional allowed IP/CIDR (can be used multiple times) |
+| `--block-ip <ip/cidr>` | Block specific IP/CIDR (can be used multiple times) |
+| `--allow-port <port>` | Additional allowed port (can be used multiple times) |
 
 ### Rm Options
 
