@@ -554,6 +554,143 @@ Deploy the Vite + React marketing website to GitHub Pages.
 
 ---
 
+## Phase 8: Audit & Observability
+
+Comprehensive logging for AI agents and automated workloads that interact with external services.
+
+### Audit Log Infrastructure
+
+#### CLI Flags
+- [ ] `--audit-log <path>` flag on `devbox create` to enable audit logging
+- [ ] `--audit-level <level>` flag (minimal|standard|verbose)
+- [ ] Default: no audit logging (opt-in for privacy)
+
+#### Log Storage
+- [ ] Create `lib/audit.sh` with logging helpers
+- [ ] Store logs at specified path or default `~/.devbox/audit/<container>/`
+- [ ] Structured JSON format for machine parsing
+- [ ] Log rotation (configurable max size/age)
+
+### Log Categories
+
+#### Network Activity (NET)
+- [ ] `NET_OUT` - outbound HTTP/HTTPS requests (domain, method, path, size)
+- [ ] `NET_BLOCKED` - blocked connection attempts (domain/IP, reason)
+- [ ] `NET_DNS` - DNS queries (already partial via dnsmasq logs)
+- [ ] Implementation: HTTP proxy sidecar (mitmproxy or similar)
+
+#### File Access (FILE)
+- [ ] `FILE_READ` - files read by processes
+- [ ] `FILE_WRITE` - files created/modified
+- [ ] `FILE_DELETE` - files removed
+- [ ] Filter: workspace files only (ignore /tmp, system files)
+- [ ] Implementation: inotifywait or eBPF
+
+#### Process Execution (EXEC)
+- [ ] `EXEC` - commands executed (command, args, exit code)
+- [ ] `EXEC_BLOCKED` - blocked commands (if command filtering enabled)
+- [ ] Implementation: auditd or eBPF
+
+#### External API Calls (API)
+- [ ] `API_CALL` - calls to known APIs (anthropic, openai, etc.)
+- [ ] Track: endpoint, token count, estimated cost
+- [ ] Aggregate: periodic summary of API usage/spend
+- [ ] Implementation: HTTP proxy with API detection
+
+#### Message Activity (MSG) - for messaging integrations
+- [ ] `MSG_OUT` - outbound messages (destination, preview/hash)
+- [ ] `MSG_IN` - inbound messages (source, preview/hash)
+- [ ] Content: truncated preview or hash-only mode for privacy
+- [ ] Implementation: HTTP proxy parsing known messaging APIs
+
+### Audit CLI Commands
+
+#### `devbox audit <container>`
+- [ ] View audit log with filtering
+- [ ] `--category <cat>` - filter by category (NET, FILE, EXEC, API, MSG)
+- [ ] `--since <time>` - filter by time (1h, 24h, 7d)
+- [ ] `--blocked-only` - show only blocked/denied actions
+- [ ] `--json` - output raw JSON for scripting
+
+#### `devbox audit <container> --tail -f`
+- [ ] Follow audit log in real-time
+- [ ] Useful for monitoring agent activity live
+
+#### `devbox audit <container> --summary`
+- [ ] Show aggregated statistics
+- [ ] API calls and estimated costs
+- [ ] Top domains contacted
+- [ ] Files modified
+- [ ] Commands executed
+
+### HTTP Proxy Sidecar
+
+#### Implementation
+- [ ] Create `docker/audit-proxy/` with mitmproxy or similar
+- [ ] Transparent proxy mode (container traffic routed through)
+- [ ] TLS interception with generated CA (optional, for HTTPS inspection)
+- [ ] Log all requests to audit log
+- [ ] Minimal performance overhead
+
+#### Privacy Modes
+- [ ] `--audit-level minimal` - domains/IPs only, no content
+- [ ] `--audit-level standard` - headers + truncated body preview
+- [ ] `--audit-level verbose` - full request/response bodies
+
+### Resource Monitoring
+
+#### Container Limits
+- [ ] `--memory <limit>` flag (e.g., `4g`)
+- [ ] `--cpus <limit>` flag (e.g., `2`)
+- [ ] `--pids-limit <n>` flag (prevent fork bombs)
+
+#### Resource Logging
+- [ ] `RESOURCE` - periodic snapshots (cpu%, mem%, net I/O)
+- [ ] `RESOURCE_ALERT` - threshold exceeded events
+- [ ] Configurable thresholds and intervals
+
+### Rate Limiting (Future)
+
+#### Per-Domain Limits
+- [ ] `--rate-limit <domain>:<n>/<period>` flag
+- [ ] Example: `--rate-limit "api.whatsapp.com:10/hour"`
+- [ ] Enforced at HTTP proxy level
+
+#### Approval Queue (Future)
+- [ ] `--approval-required <domain>:<method>` flag
+- [ ] Intercept matching requests for human approval
+- [ ] Notification via webhook or local socket
+- [ ] Timeout with configurable default (approve/deny)
+
+### Testing
+
+#### Unit Tests
+- [ ] Create `tests/test_audit.sh`
+- [ ] Test `--audit-log` flag parsing
+- [ ] Test audit log file creation and permissions
+- [ ] Test log rotation
+
+#### Integration Tests
+- [ ] Test NET_OUT logging captures HTTP requests
+- [ ] Test FILE_WRITE logging captures file changes
+- [ ] Test EXEC logging captures command execution
+- [ ] Test `devbox audit` command output
+- [ ] Test `--audit-level` modes
+
+### Bash Completion
+- [ ] Add `--audit-log` flag completion
+- [ ] Add `--audit-level` with value completion
+- [ ] Add `devbox audit` subcommand completion
+- [ ] Add `--category` values completion
+
+### Documentation
+- [ ] Document audit logging setup and use cases
+- [ ] Document log format specification
+- [ ] Document privacy considerations
+- [ ] Add examples for AI agent monitoring
+
+---
+
 ## Known Risks / To Validate
 
 - [ ] **Nix in Docker**: Test Determinate installer actually works in container
